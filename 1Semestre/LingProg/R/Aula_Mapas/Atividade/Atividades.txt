@@ -1,0 +1,11 @@
+1. Obter um mapa oficial (municípios ou setores censitários)
+
+   - descrever como obteve esse mapa
+
+2. Obter uma tabela de dados (municípios ou setores censitários)
+
+   - descrever como obteve esses dados
+
+3. Visualizar esses dados no mapa
+
+   - enviar o código utilizado e o mapa gerado
