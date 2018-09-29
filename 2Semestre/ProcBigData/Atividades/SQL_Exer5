@@ -1,0 +1,32 @@
+Aluno: Deivison Venicio Souza
+#-------------------------------------------------------------------------------------------
+Exercício 5
+#-------------------------------------------------------------------------------------------
+1. Crie uma consulta para exibir o tipo(p_type) e a média do preço de varejo
+dos itens de compra (part) em que o preço de varejo (p_retailprice)
+esteja entre R$ 2095.10 e R$ 2097.90, agrupados pelo tipo tipo.
+
+R: select p_type, avg(p_retailprice) from part where p_retailprice between 2095.10 and 2097.90 group by p_type;
+
+
+2. Crie uma consulta para exibir a coluna o_orderstatus, o preço total
+(o_totalprice) máximo, agrupados pelo status das encomendas.
+
+R: select o_orderstatus, max(o_totalprice) from orders group by o_orderstatus;
+
+
+3. Crie uma consulta para exibir a média do custo de fornecimento (ps_supplycost) da
+tabela partsupp em que o tipo (p_type) da tabela part seja "PROMO POLISHED COPPER", agrupado pelo tipo;
+
+R: select avg(ps_supplycost), p_type from partsupp, part where ps_partkey=p_partkey and p_type like '%PROMO POLISHED COPPER%' group by p_type;
+
+
+4. Exibir o status do pedido (o_orderstatus) e o maior desconto (l_discount) com data entre 11 de novembro de 1998 e 31 de dezembro de
+1998 agrupado pelo status do pedido.
+
+R: select o_orderstatus, max(l_discount) from orders, lineitem l where o_orderkey=l_orderkey and l_shipdate between '1998-11-11' and '1998-12-31' group by o_orderstatus;
+
+
+5. Crie uma consulta para exibir o nome (c_name) dos clientes e a média preço total (o_totalprice) dos clientes do BRAZIL agrupados pelo nome.
+
+R: select c_name, avg(o_totalprice) from customer, orders where c_custkey=o_custkey and c_nationkey=2 group by c_name;
