@@ -1,0 +1,499 @@
+---
+title: "Árvores de Classificação e Regressão"
+subtitle: "Classification And Regression Tree (CART) - Breiman et al. (1984)"
+author:
+- name: Deivison Venicio Souza
+fontsize: 14pt
+lang: pt-BR
+date: '`r format(Sys.Date(),"%d/%B/%Y")`'
+
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: vignette
+    toc: yes
+    df_print: paged
+    number_sections: yes
+  pdf_document:
+    toc: yes
+#csl: Global_Change_Biology.csl
+#bibliography: INF.bib
+#output: 
+#    html_document:
+#        code_folding: show
+#        fig_caption: yes
+#        number_sections: yes
+#        theme: flatly
+#        toc: yes
+#        df_print: paged
+#    highlight: tango
+---
+
+
+```{r setup, include=TRUE}
+library(rmarkdown)
+knitr::opts_chunk$set(fig.align="center", cache=F, prompt=FALSE, comment = NA, eval = TRUE)
+```
+
+
+# Descrição da atividade
+
+Vamos considerar a aplicação de uma árvore de regressão à base de dados abalone, do pacote **AppliedPredictiveModeling**. Os dados referem-se a `4177 espécimes de abalone`, tipo de molusco encontrado ao longo das águas costeiras de todos os continentes. A variável resposta é a idade do molusco, aferida pelo número de anéis internos, que é um procedimento demorado e pouco adequado. O objetivo é `ajustar um modelo que permita estimar a idade` a partir de outras medidas, que são obtidas com maior facilidade. Para maiores detalhes a respeito da base, consultar a documentação e o link fornecido.
+
+Para a análise, as primeiras 3000 linhas deverão ser usadas para ajuste, e as demais para validação.
+
+1. Qual o tamanho da árvore (número de nós finais) selecionada por validação cruzada? Quantas são as partições?
+Nota: Fixe a semente com set.seed(1). Estabeleça cp = 0.001 para o processo de poda.
+
+2. Quantas covariáveis aparecem no ajuste da árvore?
+
+3. Qual a idade estimada para moluscos com:
+a) ShellWeight=0.18 e ShuckedWeight=0.25;
+b) ShellWeight=0.31 e ShuckedWeight=0.45?
+
+4. Qual o resíduo para cada um dos dados? Considere, para o primeiro, Rings=8 e para o segundo Rings=10.
+
+5. Usando os dados de validação, calcule e apresente o valor da soma de quadrados de resíduos.
+
+
+# Carregando pacote
+
+```{r library, eval=TRUE, message = FALSE, collapse=TRUE, warning=FALSE}
+library(AppliedPredictiveModeling)          # contém o conjunto de dados "abalone"
+library(PerformanceAnalytics)               # Gráfico da matriz de correlações
+library(rpart)                              # Ajustar um modelo de árvore de regressão (CART)
+library(rpart.plot)                         # Plotar uma árvore de regressão
+library(xlsx)                               # Salvar para excel
+library(ggplot2)                            # Vizualização gráfica
+library(data.table)                         # manipulação de dados
+library(gridExtra)                          # tabela em ggplot2
+library(ggthemes)
+#library(caret)     
+```
+
+
+# Carregando dados e fazendo manipulações
+
+```{r, eval=TRUE, message = FALSE, collapse=TRUE}
+?abalone
+data(abalone)                                     # carrega conjunto de dados
+str(abalone)                                      # estrutura do data frame
+head(abalone, 10)                                 # ler as primeiras 10 linhas
+```
+
+
+```{r, eval=FALSE,message = FALSE, collapse=TRUE, echo=FALSE}
+write.xlsx(abalone, "/home/deivison/ME/CesarTaconelli_GLM/Tree/abalone.xlsx")
+```
+
+
+# Análise exploratória dos dados
+
+## Distribuição das variáveis
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+#pairs((abalone[,1:ncol(abalone)]), panel=panel.smooth)
+#ggpairs(abalone)
+chart.Correlation(abalone[,2:9], histogram=TRUE, pch=19)
+ggplot(abalone, aes(x=Type, fill=Type)) + geom_bar() +
+    scale_fill_brewer(palette = "Set1")
+```
+
+
+## Tabelas de frequências
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+with(abalone,table(Type))     # tabela freq. p/ variável Type
+
+with(abalone,prop.table(table(Type))*100) # tabela freq. (%) p/ variável Type
+
+with(abalone,table(Rings))    # tabela freq. (%) p/ variável Rings (número de anéis)
+```
+
+# Dividindo conjunto de dados: Treino e Teste
+
+Para avaliar a capacidade preditiva do modelo a ser ajustado, a base foi dividida, aleatoriamente, em duas novas bases: a primeira, com 3000 observações, para o ajuste e demais foram deixadas para avaliação do modelo (base de teste).
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+train <- abalone[1:3000,]
+test <- abalone[(nrow(train)+1):nrow(abalone),]
+
+with(train,table(Rings))    # tabela freq. p/ variável Rings (número de anéis)
+with(test,table(Rings))     # tabela freq. p/ variável Rings (número de anéis)
+```
+
+
+# Ajuste do modelo - Árvore de Regressão (Package Rpart) - Implementa o CART
+
+
+A variável resposta alvo da modelagem será **Rings** (número de anéis) do molusco. Para se obter a **idade** do molusco deve-se somar `Rings + 1,5`. A função `rpart` tem o seguinte escopo:
+
+
+**rpart(formula, data, weights, subset, na.action = na.rpart, method,
+      model = FALSE, x = FALSE, y = TRUE, parms, control, cost, ...)**
+      
+      
+O parâmetro `control` recebe uma lista de opções que controlam detalhes do algoritmo rpart. O escopo geral e os parâmetros passíveis de serem controlados estão detalhados abaixo:
+
+
+**rpart.control(minsplit = 20, minbucket = round(minsplit/3), cp = 0.01, 
+              maxcompete = 4, maxsurrogate = 5, usesurrogate = 2, xval = 10,
+              surrogatestyle = 0, maxdepth = 30, ...)**
+
+
+**minsplit** = o número mínimo de observações que devem existir em um nó para que uma divisão seja tentada.
+
+**minbucket** = o número mínimo de observações em qualquer nó terminal <leaf>. Se apenas um dos minbucket ou minsplit for especificado, o código define minsplit para minbucket*3 ou minbucket para minsplit/3, conforme apropriado.
+
+**cp** (parâmetro de complexidade) =  Qualquer divisão que não diminua a **falta total** (SSEpai?) de ajuste por um fator de cp não é tentada. Por exemplo, com anova splitting, isso significa que o **R-quadrado total deve aumentar em cp em cada etapa**. O principal papel desse parâmetro é economizar tempo de computação removendo as divisões que obviamente não valem a pena. Essencialmente, o usuário informa ao programa que qualquer divisão que não melhore o ajuste por cp provavelmente será eliminada por validação cruzada, e que, portanto, o programa não precisa buscá-la.
+
+**maxcompete** = o número de divisões do concorrente retidas na saída. É útil saber não apenas qual divisão foi escolhida, mas qual variável veio em segundo, terceiro, etc.
+
+**maxsurrogate** = o número de divisões substitutas retidas na saída. Se isso for definido como zero, o tempo de cálculo será reduzido, uma vez que aproximadamente metade do tempo computacional (diferente de setup) é usado na busca por splits substitutos.
+
+**usesurrogate** = como usar substitutos no processo de divisão. 0 significa apenas exibição; uma observação com um valor ausente para a regra de divisão primária não é enviada mais abaixo na árvore. 1 significa usar substitutos, em ordem, para dividir os sujeitos que não têm a variável primária; se todos os substitutos estiverem ausentes, a observação não será dividida. Para o **valor 2, se todos os substitutos estiverem ausentes, envie a observação na direção majoritária**. Um valor de 0 corresponde à ação da árvore e 2 às recomendações de Breiman et.al (1984).
+
+**xval** = número de validações cruzadas.
+
+**surrogatestyle** =  controla a seleção de um melhor substituto. Se definido como 0 (padrão), o programa usa o número total de classificações corretas para uma variável substituta em potencial, se definida como 1, usa a porcentagem correta, calculada sobre os valores não ausentes do substituto. A primeira opção penaliza mais severamente as covariáveis com um grande número de valores omissos.
+
+**maxdepth** = Defina a profundidade máxima de qualquer nó da árvore final, com o nó raiz contado como profundidade 0. Valores maiores que 30 rpart fornecerão resultados sem sentido em máquinas de 32 bits.
+
+
+**Usando cp=1: Um valor de cp = 1 sempre resultará em uma árvore sem divisões**
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# Um valor de cp = 1 sempre resultará em uma árvore sem divisões
+set.seed(1)
+(tree.cp1 <- rpart(Rings ~ ., data = train, control = rpart.control(cp = 1)))
+```
+
+
+**Usando os parâmetros default:**
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# Aqui o valor de cp = 0.01 (padrão)
+set.seed(1)
+(tree <- rpart(Rings ~ ., data = train, method="anova"))
+```
+
+
+A função `print` imprime a árvore construída (neste caso, com os parâmetros de controle padrão). Foram geradas 21 regras (nós), que proporcionaram a criação de 10 divisões e 11 nós terminais (leaf). O simbolo * denota um nó terminal. Somente duas variáveis foram escolhidas pelo algoritmo para trabalhar as divisões: `ShellWeight` e `ShuckedWeight`.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+print(tree)
+```
+
+
+A função `summary` fornece um resumo amplo do modelo ajustado. A função também reconhece a opção `cp` que permite ao usuário imprimir apenas poucas divisões superiores. Pode-se, por exemplo, imprimir apenas divisões com cp superiores à 0.02. Na tabela são informados os valores de `CP` (parâmetro de complexidade), `nsplit` (número de divisões), `rel error` (erro relativo), `xerror` e `xstd` (erro padrão obtido com base no conjunto de validação). O score `CP` é impresso da menor árvore (sem divisões) - que terá o maior `CP` - para a maior e mais complexa (10 divisões), que terá obviamente o menor `CP`. O número de nós terminais é sempre 1 + o número de divisões (10), portanto têm-se 11 nós terminais. O `rel error` (erro relativo) é obtido fazendo-se $1-R^2$ (coeficiente de determinação), semelhante à regressão linear (**parece ser as previsões do modelo sobre o conjunto de treinamento**). Do contrário, o `xerror` está relacionado à estatística PRESS (**parece ser o erro do modelo sobre o conjunto de validação**). O $R^2$ é calculado fazendo-se SSR/SST, em que: SSR = soma total do erro (valor previsto - valor médio)^2; e SST = soma total do erro (valor real - valor médio)^2. O $R^2$ também pode ser calculado por 1-SSE /SST. Em que: SSE = soma total do erro (valor real - valor previsto)^2.
+
+A estatística de soma dos quadrados de erros residuais previstos (PRESS) é uma forma de validação cruzada usada na análise de regressão para fornecer uma medida resumida do ajuste de um modelo a uma amostra de observações que não foram usadas para estimar o modelo. É calculado como as somas de quadrados dos resíduos de previsão para essas observações. Tendo sido produzido um modelo ajustado, cada observação, por sua vez, é removida e o modelo é refeito usando as observações restantes. O valor predito fora da amostra é calculado para a observação omitida em cada caso, e a estatística PRESS é calculada como a soma dos quadrados de todos os erros de previsão resultantes.
+
+Tendo sido produzido um modelo ajustado, cada observação, por sua vez, é removida e o modelo é refeito usando as observações restantes. O valor predito fora da amostra é calculado para a observação omitida em cada caso, e a estatística PRESS é calculada como a soma dos quadrados de todos os erros de previsão resultantes.
+
+A primeira divisão parece melhorar consideravelmente o ajuste mais. A regra 1-SE escolheria uma árvore com *?* divisões. A melhoria (CP) é a alteração percentual no SSE (soma de erro quadrático)  para essa divisão, ou seja, $1 - (SS_{right} + SS_{left})/SS_{parent}$, que é o ganho em $R^2$ para o ajuste. (**Fonte**: An Introduction to Recursive Partitioning Using the RPART Routines) (Therneau et al., 2018, p.37). Assim, por exemplo, o valor CP = 0.281965 para o nó raiz (sem divisão) é obtido fazendo-se: $1 - (6526.166 + 17190.94)/33030.56 = 0.281965$. Em que: $SS_{right}$ = soma de erro quadrático na parte direita da árvore; $SS_{left}$ = soma de erro quadrático na parte esquerda da árvore; $SS_{parent}$ = soma de erro quadrático no nó "pai".
+
+
+**Como escolher a melhor árvore?**
+
+A convenção é usar a melhor árvore (menor erro de validação cruzada) ou a menor árvore (mais simples) dentro de 1 erro padrão (SE) da melhor árvore (**regra 1-SE**). A **regra 1SE** aconselha a procurar a árvore de erro mínimo, mas depois subir 1-SE na busca de uma árvore menos complexa (mais simples). Asssim, para este problema em específico, inicialmente, encontramos que a divisão nsplits = 10 foi aquela com menor erro na validação (`xerror = 0.5677094`, com `xstd = 0.02477702`). Em seguida, fazendo-se o cálculo para a **regra 1-SE** ter-se-ia: $0.5677094 + 1*0.02477702 = 0.5924864$. Então, o valor obtido pela **regra 1-SE** foi **0.5924864**. Portanto, a **regra 1-SE** sugere que uma árvore com 7 divisões (`xerror = 0.5826542` é menor que o limiar da regra 1-SE, ou seja, está dentro de 1-SE da melhor árvore) faz efetivamente o mesmo trabalho do que a árvore com 10 divisões (que possui o menor `xerror = 0.5677094`). Por fim, a árvore com 7 divisões pode ser considerada o modelo modelo mais parcimonioso, cujo erro não é mais do que 1-SE (erro padrão) acima do erro do melhor modelo (árvore com 10 divisões).
+
+
+**Muitas vezes, uma regra de "erro de um padrão" é usada com validação cruzada, na qual escolhemos o modelo mais parcimonioso, cujo erro não é mais do que um erro padrão acima do erro do melhor modelo."**
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+summary(tree, cp = 0.02)      # um resumo da árvore (imprimindo divisões com cp superiores à 0.02)
+```
+
+
+O pacote `rpart.plot` permite gerar árvores customizadas a partir de um objeto `rpart`:
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+rpart.plot(tree)
+```
+
+
+```{r, eval=T, dpi=600}
+heat.tree <- function(tree, low.is.green = FALSE, ...) { # dots args passed to prp
+y <- tree$frame$yval
+if(low.is.green)
+y <- -y
+max <- max(y)
+min <- min(y)
+cols <- rainbow(99, end = .36)[
+ifelse(y > y[1], (y-y[1]) * (99-50) / (max-y[1]) + 50,
+(y-min) * (50-1) / (y[1]-min) + 1)]
+prp(tree, branch.col = cols, box.col = cols, ...)
+}
+
+heat.tree(tree, type = 4, varlen = 0, faclen = 0, fallen.leaves = TRUE)
+```
+
+```{r,eval=T, dpi=600}
+par(mfrow = c(4,3))
+for(iframe in 1:nrow(tree$frame)) {
+cols <- ifelse(1:nrow(tree$frame) <= iframe, "black", "gray")
+prp(tree, col = cols, branch.col = cols, split.col = cols)
+}
+```
+
+
+Usando a função `printcp(tree)` pode-se obter a tabela custo-complexidade e outras informações adicionais para o modelo ajustado. Em primeiro lugar, a função relata as variáveis atualmente usuadas para a construção da árvore de regressão: `ShellWeight` e `ShuckedWeight`. Também é mostrado o erro no nó raiz, isto é, o erro da árvore sem divisões. Tal erro nada mais é do que o MSE, dado por SSE/N. Onde: SSE = soma de erro quadrático e N = número de observações. Neste primeiro momento, o cálculo do SSE é dado pela soma da diferença entre os valores empíricos de `Rings` e a média aritmética de `Rings` em todo cojunto de treinamento. 
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+cp <- printcp(tree)         # Tabela de custo-complexidade.
+
+rsq.val <- 1-cp[,c(3,4)]    # extrai o Rsquared
+#R2 <- 1 - (sum((actual-predict )^2)/sum((actual-mean(actual))^2))
+```
+
+
+Pode-se plotar o erro de validação cruzada (10 folds) em relação ao parâmetro de complexidade (CP) usando a função `plotcp(tree)`. A função plota no eixo X o parâmetro de complexidade, no eixo Y o erro relativo obtido por validação cruzada e no eixo Z o número de divisões (nsplits) + 1 (**estou em dúvida?**). As barras verticais representam o resultado da operação `(xerror + xstd)`. Onde: xerror = Erro relativo na validação, xstd = erro padrão na validação. Assim, tem-se que as barras verticais nada mais são do que o erro relativo + 1 desvio padrão, cujos scores são obtidos por meio de valiadação cruzada. A linha pontilhada é o resultado da operação `(xerror + xstd)` = `(0.56771 + 0.024777) = 0.5924864`. O valor **0.5924864** é limiar de decisão da **regra 1-SE**. A idéia é de que árvores menores (menos complexas) que tenham erros de validação (`xerror`) menor (ou dentro) desse limiar terão desempenho semelhante a árvore com "menor estatística desempenho" na validação cruzada (menor `xerror`), com a vantagem de ser mais parcimoniosa (mais simples).
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+# curva custo-complexidade
+par(mfrow=c(3,1), mar=c(4,5,5,3)) # mar(bottom, left, top, right)
+
+plotcp(tree, upper = "splits",  minline = TRUE)     # Usando "splits" fica mais fácil ver onde cortar a árvore...          
+plotcp(tree, upper = "size",  minline = TRUE)  
+plotcp(tree, upper = "none",  minline = TRUE)  
+#tree$cptable
+```
+
+
+```{r}
+cp <- sqrt(tree$cptable[,1] * c(Inf, tree$cptable[,1][-length(tree$cptable[,1])]))
+y <- tree$cptable[,3]
+plot(order(x=cp, decreasing = T), y=y)
+```
+
+
+
+```{r, eval=FALSE,message = FALSE, collapse=TRUE, echo=FALSE}
+# Avaliando o condigo fonte da função plotcp() 
+
+plt <- function (x, minline = TRUE, lty = 3, col = 1, upper = c("size", 
+    "splits", "none"), ...) 
+{
+    dots <- list(...)
+    if (!inherits(x, "rpart")) 
+        stop("Not a legitimate \"rpart\" object")
+    upper <- match.arg(upper)
+    p.rpart <- x$cptable
+    if (ncol(p.rpart) < 5L) 
+        stop("'cptable' does not contain cross-validation results")
+    xstd <- p.rpart[, 5L]
+    xerror <- p.rpart[, 4L]
+    nsplit <- p.rpart[, 2L]
+    ns <- seq_along(nsplit)
+    cp0 <- p.rpart[, 1L]
+    print(cp0)    #my insert
+    cp <- sqrt(cp0 * c(Inf, cp0[-length(cp0)]))
+    print(cp)
+    if (!"ylim" %in% names(dots)) 
+        dots$ylim <- c(min(xerror - xstd) - 0.1, max(xerror + 
+            xstd) + 0.1)
+    do.call(plot, c(list(ns, xerror, axes = FALSE, xlab = "Parâmetro de complexidade (PC)", 
+        ylab = "X-val Relative Error", type = "o"), dots))
+    box()
+    axis(2, ...)
+    segments(ns, xerror - xstd, ns, xerror + xstd)
+    axis(1L, at = ns, labels = as.character(signif(cp, 2L)), 
+        ...)
+    switch(upper, size = {
+        axis(3L, at = ns, labels = as.character(nsplit + 1), 
+            ...)
+        mtext("size of tree", side = 3, line = 1.5)
+    }, splits = {
+        axis(3L, at = ns, labels = as.character(nsplit), ...)
+        mtext("number of splits", side = 3, line = 3)
+    })
+    minpos <- min(seq_along(xerror)[xerror == min(xerror)])
+    #print(minpos)                   # my inserc
+    #h <- (xerror + xstd)[minpos]    # my inserc
+    #print(h)
+    if (minline) 
+        abline(h = (xerror + xstd)[minpos], lty = lty, col = "red")
+    invisible()
+}
+
+plt(x=tree, minline = TRUE, lty = 3, col = 1, upper = "size")
+
+```
+
+
+Podemos obter gráficos do ajuste usando a função `rsq.rpart(tree)`. A primeira figura mostra a relação R-squared (coeficiente de determinação) versus Number of Splits (número de divisões). Nesta figura duas curvas são plotadas indicando o **R-squared Relativo** e **R-squared Apparent**. O "rel error" é 1−R2, semelhante a regressão linear (**creio que seja o erro nas observações usadas para treinar o modelo?**). O "xerror" está relacionado à estatística PRESS. Este é o erro nas observações dos dados de validação cruzada. (Fonte: https://stats.stackexchange.com/questions/103018/difference-between-rel-error-and-xerror-in-rpart-regression-trees).
+
+A segunda figura é equivalente a obtida pela função `plotcp(tree)`. A figura sugerem que a árvore deve ser podada (prune) para incluir apenas 9 divisões.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+rsq.rpart(tree)
+```
+
+
+# 1) Desvendando a árvore de regressão
+
+## a) A árvore sem divisões
+
+Inicialmente, pode-se considerar que `Rings` (variável resposta y) pode ser explicado pela sua média. Então, utilizando-se dos valores reais de `y` do conjunto `train` (n = `r length(train$Rings)`) pode-se obter a média empírica e soma de erro quadrático (Sum of Squared Errors - SSE). O cálculo do SSE é dado pela soma da diferença entre os valores empíricos de `Rings` e a média aritmética de `Rings`. Assim, têm-se:
+
+
+- Média aritmética da variável resposta `y` no conjunto `train` = `r mean(train$Rings)`;
+- Score SSE no conjunto `train` = `r format(x=sum((train$Rings - mean(train$Rings))^2), digits = 10, scientific = F)`.
+
+Quando o modelo treinado `tree` é impresso verifica-se que os valores `r mean(train$Rings)` e `r format(x=sum((train$Rings - mean(train$Rings))^2), digits = 10, scientific = F)` irão compor a raíz da árvore de regressão: `(1) root n=3000 SSE=33030.5600  Mean=9.941000`. No nó raiz estão 100% dos dados do conjunto `train`.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+setDT(train)
+hatTrain <- train[,c("Rings", "ShellWeight", "ShuckedWeight")]                # seleciona colunas
+hatTrain[, `:=` (MeanObs = mean(Rings))][]                                    # média aritmética e empilha
+hatTrain[, `:=` (SSE = sum((Rings - MeanObs)^2))][]                           # SSE
+hatTrain[, `:=` (N=.N)][]                                                     # número de observações
+hatTrain[, `:=` (MSE = sum((Rings - MeanObs)^2)/length(Rings))][]             # MSE
+hatTrain[, `:=` (R2 = 1-(sum((Rings-MeanObs)^2)/sum((Rings-mean(Rings))^2)))] # R-squared
+hatTrain[, `:=` (RelError = 1-R2)]                                            # Relative Error
+```
+
+```{r, eval=FALSE,message = FALSE, collapse=TRUE, echo=FALSE}
+write.xlsx(hatTrain, "/home/deivison/ME/CesarTaconelli_GLM/Tree/hatTrain.xlsx")
+```
+
+
+## b) A primeira decisão de partição da árvore de regressão**
+
+
+A partir do modelo de árvore gerado pode-se observar que apenas duas variáveis foram utilizadas pelo CART para produzir a árvore de regressão: `ShellWeight`e `ShuckedWeight`. A primeira decisão de partição do algoritmo foi: `2) ShellWeight< 0.19475 n=1248  SSE=6526.1660  Mean=7.853365`. Assim, a primeira partição dividiu as 3000 observações em grupos de 1248 (42%) e 1752 (58%) (nós 2 e 3) com valores médios de `Rings` de 7.853365 e 11.428080, respectivamente. Tendo por base essa primeira partição (ShellWeight < 0.19475 e ShellWeight $\geq$ 0.19475) pode-se avaliar novamente o score SSE considerando-se a média aritmética dos valores empiricos de `Rings` em cada partição. 
+
+
+Fazendo cálculos simples podemos ratificar os percentuais apresentados nos dois nós folhas iniciais da árvore de regressão:
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+with(train,table(ShellWeight<0.19475))        # tabela freq. p/ variável Class ShellWeight<0.19475
+with(train,prop.table(table(ShellWeight<0.19475))*100)
+```
+
+
+Então, pode-se calcular as novas médias aritméticas e SSEs para a primeira partição proposta. Os resultados devem corresponder ao observado em:
+
+`2) ShellWeight< 0.19475 n=1248  SSE=6526.1660  Mean=7.853365`; e
+
+`3) ShellWeight>=0.19475 n=1752 SSE=17190.9400 mean=11.428080`.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+
+hatTrain$split.1 <- "Part.1"
+hatTrain$split.1[hatTrain$ShellWeight >= tree$splits[1,4]] <- "Part.2"
+hatTrain[, `:=` (Mean.1 = mean(Rings)), by="split.1"]                                        # média aritmética por partição e empilha
+setorder(hatTrain, split.1)                                                                  # ordenando com base em "binary.1"
+hatTrain[, `:=` (SSE.1 = sum((Rings - Mean.1)^2)), by="split.1"][]                           # SSE
+hatTrain[, `:=` (N.1=.N), by="split.1"][]                                                    # número de observações por partição
+hatTrain[, `:=` (MSE.1 = sum((Rings - Mean.1)^2)/length(Rings)),by="split.1"][]              # MSE
+hatTrain[, `:=` (CP.1 = 1 - sum(unique(SSE.1))/unique(SSE))][]                               # CP
+hatTrain[, `:=` (R2.1 = 1-(sum((Rings-Mean.1)^2)/sum((Rings-mean(Rings))^2)))]               # R-squared
+
+#1-(SSE.part1 + SSE.part2)/SST                                                        
+#hatTrain[, `:=` (SE.2= sum((Rings - Mean.2)^2))][]                 # SSE total primeira partição  
+#with(hatTrain,table(Particao.1))
+
+```
+
+
+Para melhor compreensão pode-se fazer um scatterplot das duas variáveis utilizadas (`ShellWeight`e `ShuckedWeight`) pelo algoritmo para estabelecer as partições:
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+
+p <- ggplot() + theme_stata()
+(p <- p + geom_point(data=hatTrain, aes(x=ShellWeight, y=ShuckedWeight)))
+
+```
+
+
+Aqui, podemos visualizar a primeira partição proposta pelo algoritmo:
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+
+p <- ggplot() + theme_stata()
+p <- p + geom_point(data=hatTrain, aes(x=ShellWeight, y=ShuckedWeight))
+p <- p + geom_vline(xintercept=tree$splits[1,4], colour="red", linetype="dotted")
+p <- p + geom_text(aes(x=tree$splits[1,4], y=1.3, label="SheW < 0.19475"), 
+            colour="red", angle=90, vjust = 1.2, text=element_text(size=7))
+(p <- p + geom_point(data=hatTrain, aes(x=ShellWeight, y=ShuckedWeight, colour=split.1)) + 
+    scale_colour_manual(values = c("black", "red")) + theme(legend.position="none"))
+
+```
+
+
+#####################################################################################################################################
+
+- **Um nova partição**
+
+Inicialmente, como já sabe-se á arvore foi dividida em duas parte: ShellWeight< 0.19475 e e ShellWeight $\geq$ 0.19475. Assim, vamos considerar as partições do lado esquerdo da árvore. Fazendo-se isso, a próxima partição será: `4) ShellWeight< 0.06775 333   874.7988  5.939940*`, que indicará um nó terminal. Caso contrário (ShellWeight $\geq$ 0.06775) uma nova partição foi realizada. Assim, o conjunto de dados foi dividido em duas parte tendo por base `ShellWeight < 0.06775`, onde **11%** (n=333) dos dados tiveram valores < 0.06775 para a variável `ShellWeight`, e os demais **31%** (n=915) tiveram valores superiores. Tendo por base essa nova partição (ShellWeight < 0.06775 e ShellWeight $\geq$ 0.06775) pode-se avaliar novamente o score SSE considerando-se a média aritmética dos valores empiricos de `y` em cada partição. 
+
+
+Fazendo cálculos simples podemos ratificar os percentuais apresentados nos dois nós folhas iniciais da árvore de regressão:
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+with(hatTrain[ which(ShellWeight<0.19475),],table(ShellWeight<0.06775))   # tabela freq. p/ variável Class ShellWeight<0.06775
+```
+
+
+Então, pode-se calcular as novas médias aritméticas e SSEs para a primeira partição proposta. Os resultados devem corresponder ao observado em:
+
+`4) ShellWeight< 0.06775 333   874.7988  5.939940 *`; e
+
+`5) ShellWeight>=0.06775 915  3988.4870  8.549727`.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+
+hatTrain$split.2 <- NA
+
+hatTrain$split.2[hatTrain$ShellWeight < 0.19475 & hatTrain$ShellWeight < 0.06775] <- "Part.3"
+hatTrain$split.2[hatTrain$ShellWeight < 0.19475 & hatTrain$ShellWeight >= 0.06775] <- "Part.4"
+hatTrain$split.2[hatTrain$ShellWeight > 0.19475 & hatTrain$ShellWeight < 0.4095] <- "Part.5"
+hatTrain$split.2[hatTrain$ShellWeight > 0.19475 & hatTrain$ShellWeight >= 0.4095] <- "Part.6"
+
+hatTrain[, `:=` (Mean.3 = mean(Rings)), by="split.2"]              # média aritmética por partição e empilha
+setorder(hatTrain, split.2)                                        # ordenando com base em "binary.1"
+hatTrain[, `:=` (SSE.3 = sum((Rings - Mean.3)^2)), by="split.2"][] # SSE
+#with(hatTrain,table(split.2))
+
+```
+
+
+Podemos visualizar as novas partições propostas pelo algoritmo:
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi=600}
+
+p <- ggplot() + theme_stata()
+p <- p + geom_point(data=hatTrain, aes(x=ShellWeight, y=ShuckedWeight, colour=split.2)) +
+  scale_colour_manual(values = c("black", "red", "blue", "green")) + theme(legend.position="none")
+p <- p + geom_vline(xintercept=0.19475, colour="red", linetype="dotted")
+p <- p + geom_vline(xintercept=0.06775, colour="black", linetype="dotted")
+p <- p + geom_vline(xintercept=0.4095, colour="blue", linetype="dotted")
+p <- p + geom_text(aes(x=0.19475, y=1.3, label="SheW = 0.19475"), 
+            colour="red", angle=90, vjust = 1.2, text=element_text(size=7))
+p <- p + geom_text(aes(x=0.06775, y=1.3, label="SheW = 0.06775"), 
+            colour="black", angle=90, vjust = 1.2, text=element_text(size=7))
+p <- p + geom_text(aes(x=0.4095, y=1.3, label="SheW = 0.4095"), 
+            colour="blue", angle=90, vjust = 1.2, text=element_text(size=7))
+p
+
+```
+
+

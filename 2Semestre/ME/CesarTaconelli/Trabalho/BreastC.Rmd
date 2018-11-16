@@ -1,0 +1,653 @@
+---
+title: "Modelos Lineares Generalizados"
+subtitle: "Modelo linear generalizado com resposta binomial e função de ligação logito"
+author:
+- name: Deivison Venicio Souza
+fontsize: 14pt
+lang: pt-BR
+date: '`r format(Sys.Date(),"%d/%B/%Y")`'
+
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: vignette
+    toc: yes
+    df_print: paged
+    number_sections: yes
+  pdf_document:
+    toc: yes
+#csl: Global_Change_Biology.csl
+#bibliography: INF.bib
+#output: 
+#    html_document:
+#        code_folding: show
+#        fig_caption: yes
+#        number_sections: yes
+#        theme: flatly
+#        toc: yes
+#        df_print: paged
+#    highlight: tango
+---
+
+
+```{r setup, include=TRUE}
+library(rmarkdown)
+knitr::opts_chunk$set(fig.align="center", cache=F, prompt=FALSE, comment = NA, eval = TRUE)
+```
+
+
+# Descrição da atividade
+
+Vamos considerar a aplicação de um modelo linear generalizado com resposta binomial e função de ligação logito (regressão logística). Os dados são referentes a 699 nódulos de mama. O objetivo é ajustar um modelo preditivo, que permita classificá-los em benignos ou malignos com base num conjunto de covariáveis. Segue a descrição das variáveis usadas na análise:
+
+- CL: Clump Thickness;
+- MA: Marginal Adhesion;
+- BC: Bland Chromatin;
+- Class: benign, para benigno; malignant, para maligno (variável resposta).
+
+As três primeiras variáveis (variáveis explicativas) são expressas numa escala numérica, com valores 0, 1, 2,. . . , 10. Além disso, a variável resposta foi codificada, para a análise, de forma que y = 0, se o tumor é benigno, e y = 1, caso o tumor seja maligno. Assim, vamos modelar a probabilidade (ou melhor, a chance) de um tumor ser maligno.
+
+O conjunto de dados **BreastCancer** utilizado está disponível no pacote **mlbench** e, constitui informações sobre câncer de mama de Wisconsin (Wisconsin Breast Cancer). O objetivo é identificar cada uma das classes benignas ou malignas. O conjunto de dados possui 699 observações e 11 variáveis, sendo uma delas a classe alvo. Para este estudo utilizar-se-á apenas das variáveis **Cl.thickness**	(Clump Thickness), **Marg.adhesion** (Marginal Adhesion), **Bl.cromatin**	(Bland Chromatin) e **Class** (variável resposta). Para facilitar as variáveis explicativas foram renomeadas para **CT**, **MA** e **BC**.
+
+Um modelo linear generalizado é definido pela especificação de três componentes: (**Fonte**: slides de aula)
+
+**1) O componente aleatório**;
+
+A especificação do componente aleatório do modelo GLM requer:
+
+- Requer a definição de uma distribuição de probabilidades para a variável resposta.
+
+- A variável resposta é discreta ou contínua? Sua distribuição é simétrica? Qual o conjunto de valores com probabilidade não nula?
+
+- Deve-se propor um modelo que tenha propriedades compatíveis à distribuição dos dados;
+
+- Não se tendo convicção sobre uma particular escolha, pode-se testar diferentes alternativas ou usar alguma abordagem que não exija essa especificação.
+
+**2) O componente sistemático**; e
+
+- Preditor linear do modelo, em que são inseridas as covariáveis por meio de uma combinação linear de parâmetros.
+
+**3) Uma função de ligação**.
+
+- Função real, monótona e diferenciável, denotada por `g()`, que conecta os componentes aleatório e sistemático do modelo.
+
+- A função de ligação tem o papel de linearizar a relação entre os componentes aleatório e sistemático do modelo.
+
+- Proporcionar interpretações práticas para os parâmetros de regressão (betas).
+
+-------------------------------------------------------------------------------------------
+**Para o estudo de caso em questão a especificação dos componentes do GLM ficaria:**
+
+-------------------------------------------------------------------------------------------
+
+- **Componente aleatório**: `Resposta Y possui distribuição binomial (benign, malignant)`
+
+- **Componente sistemático**: $n_{i} = \beta_{0} + \beta_{1}CT_{i} + \beta_{2}MA_{i} + \beta_{3}BC_{i}$
+
+- **Função de ligação**: `g() = logito`
+
+# Carregando pacote
+
+```{r library, eval=TRUE, message = FALSE, collapse=TRUE, warning=FALSE}
+library(mlbench)                            # contém o conjunto de dados "BreastCancer"
+library(dplyr)                              # função mutate_if()
+library(magrittr)                           # piper
+library(statmod)                            # resíduos quantílicos (função qres.binom())
+library(hnp)                                # gráficos meio-normais
+library(caret)                              # sensibilidade
+library(effects)                            # grafico de efeitos
+```
+
+
+# Carregando dados e fazendo manipulações
+
+Para ajustar o modelo usando a função `glm` foi necessário realizar a conversão das variáveis "CT", "MA" e "BC" para classe `numeric`. Originalmente estas varáveis aparecem com classe **factor** ocasionando erro no ajuste do modelo.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+data(BreastCancer)                                # carrega conjunto de dados
+breast <- BreastCancer[,c(2,5,8,11)]              # seleciona variáveis de interesse
+colnames(breast) <- c("CT", "MA", "BC", "Class")  # renomeia as variáveis
+str(breast)                                       # estrutura do data frame
+
+breast[,1:3] %<>% mutate_if(is.factor,as.numeric) # transforma de factor p/ numeric
+str(breast)                                       # estrutura do data frame
+
+head(breast, 10)                                  # ler as primeiras 6 linhas
+```
+
+
+# Análise exploratória dos dados
+
+## Distribuição das variáveis
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi = 600}
+# Histograma: constata-se que a variável resposta (Class) tem distribuição binomial
+
+with(breast, hist(ifelse(Class == 'malignant',1 ,0), main = 'Wisconsin Breast Cancer',
+                  xlab = 'Class', ylab = 'Frequência'))
+
+# Histograma de frequência p/ variável CT 
+with(breast, hist(CT, main = 'Wisconsin Breast Cancer', xlab = 'CT', ylab = 'Frequência'))
+
+# Histograma de frequência p/ variável MA 
+with(breast, hist(MA, main = 'Wisconsin Breast Cancer', xlab = 'MA', ylab = 'Frequência'))
+
+# Histograma de frequência p/ variável BC 
+with(breast, hist(BC, main = 'Wisconsin Breast Cancer', xlab = 'BC', ylab = 'Frequência'))
+```
+
+
+## Tabelas de frequências
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+with(breast,table(Class))                 # tabela freq. p/ variável Class
+
+with(breast,prop.table(table(Class))*100) # tabela freq. p/ variável Class (%)
+
+with(breast, table(Class, CT))            # tabela freq. p/ variável CT
+
+with(breast, table(Class, MA))            # tabela freq. p/ variável MA
+
+with(breast, table(Class, BC))            # tabela freq. p/ variável BC
+
+```
+
+
+# Dividindo conjunto de dados: Treino e Teste
+
+Para avaliar a capacidade preditiva do modelo a ser ajustado, a base foi dividida, aleatoriamente, em duas novas bases: a primeira, com 500 observações, para o ajuste; a segunda, com 199 linhas, para validação. Na sequência é apresentado o resumo do modelo ajustado.
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+set.seed(232)                                      # semente de reprodutibilidade.
+ordem <- sample(1:nrow(breast))                    # sorteio aleatório de linhas.
+breast_aj <- breast[ordem[1:500],]                 # cria base de ajuste.
+breast_pred <- breast[ordem[501:nrow(breast)],]    # cria base de validação.
+
+summary(breast_aj)                                 # sumário dos dados de treino
+
+summary(breast_pred)                               # sumário dos dados de teste
+```
+
+
+# Ajuste do modelo - Família binomial e função de ligação logito
+
+Utilizou-se a função `glm` do pacote **stats** para ajustar o modelo linear generalizado. No argumento `family` especificou-se a família binomial (enquanto distribuição da variável resposta Y). Sabendo que a probabilidade do nódulo ser **benign** e **malignant** varia de 0 a 1, é necessário usar uma função de ligação que limite a resposta de Y a esse intervalo. A função de ligação escolhida para isso foi a `logit` (logito).
+
+O modelo foi ajustado usando as covariáveis **CT**, **MA** e **BC**. Aplicando-se a função **summary** pode obter um resumo do ajuste, com os betas estimados, o erro padrão associado a cada parâmetro estimado, AIC, e teste de Wald. Além disso, pode-se observar quais covariáveis apresentam efeito significativo na classificação do tumor. A partir da análise da significância dos parâmetros estimados (betas) constata-se que todas as covariáveis foram altamente significativas (***), isto é, estão altamente associadas a uma maior probabilidade de ocorrência de tumor maligno.
+
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+ajuste <- glm(formula = Class ~ CT + MA + BC, family = binomial(link = 'logit'), data = 
+                breast_aj)        # ajuste da regressão logística
+
+names(ajuste)                     # elementos disponíveis no objeto ajuste
+
+summary(ajuste)                   # sumário do ajuste
+```
+
+
+# Modelo ajustado e estimação pontual
+
+
+- **Na escala do preditor**:
+
+$$
+ln \left[\frac{\pi_{x}}{1-\pi_{x}}\right] = \beta_{0} + \beta_{1}CT_{i} + \beta_{2}MA_{i} + \beta_{3}BC_{i}
+$$
+
+
+$$
+ln \left[\frac{\pi_{x}}{1-\pi_{x}}\right] = -9.9033 + 0.9118CT_{i} + 0.4917MA_{i} + 0.8925BC_{i}
+$$
+
+
+- **Na escala da resposta Y**:
+
+$$
+\frac{\pi_{x}}{1-\pi_{x}} = e^{\beta_{0} + \beta_{1}CT_{i} + \beta_{2}MA_{i} + \beta_{3}BC_{i}}
+$$
+
+
+$$
+\pi_{x} = \frac{e^{\beta_{0} + \beta_{1}CT_{i} + \beta_{2}MA_{i} + \beta_{3}BC_{i}}}{e^{\beta_{0} + \beta_{1}CT_{i} + \beta_{2}MA_{i} + \beta_{3}BC_{i}}+ 1}
+$$
+
+
+$$
+\pi_{x} = \frac{e^{-9.9033 + 0.9118CT_{i} + 0.4917MA_{i} + 0.8925BC_{i}}}{e^{-9.9033 + 0.9118CT_{i} + 0.4917MA_{i} + 0.8925BC_{i}}+ 1}
+$$
+
+**Com base na questão 2**: Para nódulos com CT=4, MA=4 e BC=5, a probabilidade estimada do tumor ser maligno é:
+
+
+**O cálculo manual na escala do preditor fica**:
+
+Y = -9.9033+0.9118*4+0.4917*4+0.8925*5
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+(Y <- ajuste$coefficients[1]+ajuste$coefficients[2]*4+
+               ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)
+
+```
+
+
+**O cálculo manual na escala da resposta Y fica**: 
+
+Y = exp(-9.9033+0.9118*4+0.4917*4+0.8925*5)/(exp(-9.9033+0.9118*4+0.4917*4+0.8925*5)+1)
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+(Y <- exp(ajuste$coefficients[1]+ajuste$coefficients[2]*4+
+               ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)/
+   (exp(ajuste$coefficients[1]+ajuste$coefficients[2]*4+
+          ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)+1))
+
+```
+
+
+**Agora, usando a função predict do R**:
+
+
+- **Na escala do preditor**:
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+new_data <- data.frame(CT=4, MA=4, BC=5)
+
+# Predição na escala do preditor (link).
+predict(ajuste, newdata = new_data)
+
+# Predição na escala do preditor (link), com os erros padrões associados.
+p_link <- predict(ajuste, newdata = new_data, se.fit = TRUE)
+
+# IC (95%) na escala do preditor (link), para a nova observação.
+(IC_link <- cbind(LI = p_link$fit - 1.96 * p_link$se.fit, 
+                  LS = p_link$fit + 1.96 * p_link$se.fit))
+  
+```
+
+
+- **Na escala da resposta Y**:
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+
+# Predição na escala de probabilidade da resposta (inversa do link).
+predict(ajuste, newdata = new_data, type = 'response') 
+
+# Predição na escala de probabilidade da resposta, com os erros padrões associados.
+p_resp <- predict(ajuste, newdata = new_data, type = 'response', se.fit = TRUE)
+
+# IC (95%) na escala de probabilidade da resposta, para a nova observação.
+(IC_resp <- cbind(LI = p_resp$fit - 1.96 * p_resp$se.fit, 
+                  LS = p_resp$fit + 1.96 * p_resp$se.fit))
+
+#exp(IC_link)/(exp(IC_link) + 1)
+
+```
+
+
+# Predições - Conjunto de treino
+
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+# Predição na escala do preditor (link)
+breast_aj$pred_pred <- predict(ajuste, newdata = breast_aj)
+
+# Predição na escala da resposta (probabilidade, inversa do link)
+breast_aj$pred_resp <- predict(ajuste, newdata = breast_aj, type = 'response')
+
+hist(breast_aj$pred_resp, xlab = "Preditos", ylab = "Frequência",
+     main = "Histograma da probabilidade de resposta", 
+     sub = "(sem limiar estabelecido)")
+```
+
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+# Matriz de confusão - conjunto de treino
+breast_aj$pred2 <- ifelse(breast_aj$pred_pred > 0.5, 1, 0)
+
+hist(breast_aj$pred2, xlab = "Preditos", ylab = "Frequência",
+     main = "Histograma da probabilidade de resposta", 
+     sub = "(limiar > 0,5 p/ Maligno)")
+
+tab1 <- table(Predito = breast_aj$pred2, Observado = breast_aj$Class)
+dimnames(tab1)[[1]] <- c('benign', 'malignant')
+print(tab1)
+```
+
+
+# IC para os parâmetros estimados (betas)
+
+Os intervalos de 95% de confiança para os parâmetros do modelo com base na estatística de Wald:
+
+$$
+IC(\beta_{k}; 1-\alpha) = \hat{\beta}_{k} \pm z_{\alpha/2}*ep(\hat{\beta}_{k})
+$$
+
+
+- IC 95% para a variável **CT**:
+
+**Limite Inferior**: 0,9118 - 1,96*(0,1268) = 0,6633432
+
+**Limite Superior**: 0,9118 + 1,96*(0,1268) = 1,160244
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# IC p/ variável CT
+(LI_CT <- summary(ajuste)$coefficients[2,1]-(1.96*summary(ajuste)$coefficients[2,2]))
+(LS_CT <- summary(ajuste)$coefficients[2,1]+(1.96*summary(ajuste)$coefficients[2,2]))
+```
+
+
+- IC 95% para a variável **MA**:
+
+**Limite Inferior**: 0,4917 - 1,96*(0,1078) = 0,2804335
+
+**Limite Superior**: 0,4917 + 1,96*(0,1078) = 0,7029232
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# IC p/ variável MA
+(LI_MA <- summary(ajuste)$coefficients[3,1]-(1.96*summary(ajuste)$coefficients[3,2]))
+(LS_MA <- summary(ajuste)$coefficients[3,1]+(1.96*summary(ajuste)$coefficients[3,2]))
+```
+
+
+- IC 95% para a variável **BC**:
+
+**Limite Inferior**: 0,8925 - 1,96*(0,1460) = 0,6063842
+
+**Limite Superior**: 0,8925 + 1,96*(0,1460) = 1,178686
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# IC p/ variável BC
+(LI_BC <- summary(ajuste)$coefficients[4,1]-(1.96*summary(ajuste)$coefficients[4,2]))
+(LS_BC <- summary(ajuste)$coefficients[4,1]+(1.96*summary(ajuste)$coefficients[4,2]))
+```
+
+
+Alternativamente, usando a função `confint.default` pode-se obter os intervalos de confiança para cada parâmetro estimado do modelo: 
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# Usando a função `confint.default`
+confint.default(ajuste, level=0.95)       # IC com base no teste de Wald.
+
+# Usando a função `confint`
+confint(ajuste)                           # IC com base no perfil da verossimilhança.
+```
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# Usando a função `confint.default`
+confint.default(ajuste, level=0.95)       # IC com base no teste de Wald.
+
+# Usando a função `confint`
+confint(ajuste)                           # IC com base no perfil da verossimilhança.
+```
+
+
+# IC associados às predições - Conjunto de treino
+
+- **Na escala da resposta Y**:
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+
+# Predição na escala de probabilidade da resposta (inversa do link).
+pred_resp <- predict(ajuste, newdata = breast_aj, type = 'response') 
+
+# Predição na escala de probabilidade da resposta, com os erros padrões associados.
+p_resp <- predict(ajuste, newdata = breast_aj, type = 'response', se.fit = TRUE)
+
+# IC (95%) na escala de probabilidade da resposta, para a nova observação.
+IC_resp <- cbind(LI = p_resp$fit - 1.96 * p_resp$se.fit, 
+                  LS = p_resp$fit + 1.96 * p_resp$se.fit)
+
+#cbind(Predicao = breast_aj$pred_resp, IC_resp)
+#exp(IC_link)/(exp(IC_link) + 1)
+
+```
+
+
+# Gráficos de Efeitos
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi = 600}
+
+# Gráfico de efeitos marginais de cada variável
+plot(allEffects(ajuste), type = 'response', main = 'Gráfico de efeitos')
+
+```
+
+
+# Razão de chance (odds ratio) e IC para RC 
+
+A razão de chance é o exponencial da estimativa pontual. Os intervalos de confiança para as razões de chance (odds ratio – OR), fixando o nível de confiança de 95%: (**encontrei em um tutorial**: http://www.estatisticacomr.uff.br/?p=598)
+
+A razão de chances pode ser interpretado como o aumento estimado na probabilidade de sucesso associada a mudança em uma unidade no valor da variável do preditor linear.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# Razões de chance
+(OR <-exp(ajuste$coefficients))
+```
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# IC para as razões de chance
+(IC <- exp(confint.default(ajuste, level=0.95)))
+
+(OR_IC <- cbind(OR, IC))
+```
+
+
+**Simulando o aumento de um unidade em CT para responder a questão 1:**
+
+**A questão 1** Para uma unidade a mais no escore de CT (fixados os valores de MA e BC), a chance de um tumor maligno será?
+
+Para descobrir a chance fiz o seguinte:
+
+- Inicialmente, obtive a probabilidade para os seguintes valores das preditoras: CT=4, MA=4 e BC=5, cujo resultado foi: **Y = 0,5432091**;
+
+- Em seguida, simplesmente aumentei uma unidade em CT (isto é, aumentei para 5), então usei novamente as preditoras: CT=5, MA=4 e BC=5, cujo resultado foi: **Y = 1,351929**.
+
+- Finalmente, é fácil verificar que a relação é multiplicativa: **2,4888** * **0,5432091 = 1,351929**.
+
+O valor 2,2888 é o mesmo obtido fazendo-se a exponencial dos parâmetros estimados, sendo definido como **Razão de Chance**. O valor da RC é observável para cada parâmetro.  
+
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+(Y <- exp(ajuste$coefficients[1]+ajuste$coefficients[2]*4+
+               ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)/
+   (exp(ajuste$coefficients[1]+ajuste$coefficients[2]*4+
+          ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)+1))
+
+(Y2 <- exp(ajuste$coefficients[1]+ajuste$coefficients[2]*5+
+               ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)/
+   (exp(ajuste$coefficients[1]+ajuste$coefficients[2]*4+
+          ajuste$coefficients[3]*4+ajuste$coefficients[4]*5)+1))
+
+```
+
+
+# Diagnóstico do ajuste
+
+
+O diagnóstico do ajuste é fundamental em modelos de regressão linear tradicional, e em GLM não é diferente. O principal componente no diagnóstico de MLGs é, novamente, a análise de resíduos. (**Fonte:** slides de aula)
+
+O objetivo principal dessa etapa da análise é a avaliação do modelo ajustado. No caso de MLGs, baseia-se, dentre outros, na verificação dos seguintes itens: (**Fonte:** slides de aula)
+
+- Avaliação da distribuição proposta;
+- Avaliação da parte sistemática do modelo;
+- Adequação da função de ligação;
+- Identificação e avaliação do efeito de observações mal ajustadas;
+- Identificação de pontos influentes.
+
+
+## Resíduos (default)
+
+Pode-se, inicialmente, verificar os resíduos usando-se da função **plot** do R. No entanto, por se tratarem de dados binários os gráficos apresentados não são convenientes para analisar os resíduos. 
+
+**Cesar Taconelli**: Os gráficos de resíduos através do plot *default* têm comportamento bastante atípico, mas característico da análise de dados binários, devido aos empates.
+
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE, dpi = 600}
+par(mfrow=c(2,2))
+breast_aj$res_default <- ajuste$residuals
+plot(ajuste)      # gráficos do ajuste (me parece que não são úteis para analisar os resíduos!)
+```
+
+O gráfico quantil-quantil normal para os resíduos componentes da deviance:
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi = 600}
+qqnorm(resid(ajuste), pch = 20)
+qqline(resid(ajuste))
+```
+
+
+## Resíduos Quantílicos Aleatorizados
+
+
+**Cesar Taconelli**: Para um diagnóstico mais adequado da qualidade do ajuste, é mais interessante usar os **resíduos quantílicos aleatorizados**. Para tanto, o pacote **statmod** dispõe da função `qres.binom()`. Além disso, pode-se usar os gráficos meio-normais com envelope simulado, disponíveis no pacote `hnp`.
+
+Então, usando a `qres.binom()` e plotando-se os **resíduos quantílicos aleatorizados** constata-se uma boa dispersão em torno da média zero, variando aproximadamente entre -3,037485 e 3,251872. Os **resíduos quantílicos** plotados em função dos **valores preditos** (na escala do preditor) mostraram também tendência similar, ou seja, com uma distribuição aleatória, homocedastica e aparentemente normal. Além disso, o gráfico **Normal Q-Q qplot** produzido a partir do resíduo quantílico mostra aderência a distribuição normal - com pequenos desvios nas extremidades - o que é indicativo de um modelo bem ajustado.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi = 600}
+# Resíduos quantílicos aleatorizados
+breast_aj$rqa <- statmod::qres.binom(ajuste)  # Calcula os rqa e add ao dataframe "breast_aj"
+plot(breast_aj$rqa, ylab = "Resíduos quantílicos aleatorizados")    # Plota os rqa
+abline (h =0, col = "red")
+
+#with(breast_aj, plot(rqa, col='black', xlab='Index', ylab='Resíduos'))
+#abline (h =0, col = "red")
+
+# Papel de probabilidade normal
+qqnorm(breast_aj$rqa)                 
+qqline(breast_aj$rqa, col = "red")
+
+# resíduos versus valores preditos (na escala do preditor)
+with(breast_aj, plot(pred_pred, rqa, col='black', xlab='Valores preditos', ylab='Resíduos'))
+abline (h =0, col = "red")
+```
+
+
+## Envelope Simulado - Função hnp
+
+
+**Cesar Taconelli**: O padrão para um ajuste adequado é os resíduos (pontos) dispostos no interior do envelope (linhas) simulado. Novamente temos um indicativo de que o modelo está bem ajustado.
+
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE, dpi = 600}
+# Envelope Simulado - Função hnp
+
+hnp::hnp(ajuste)
+
+```
+
+
+# Previsão - Conjunto de validação
+
+
+O modelo ajsutado foi usado na classificação dos dados de validação. Os seguintes resultados foram obtidos:
+
+- Usando a função **predict** para obter as prediçoes para os dados não usados no ajuste.
+
+- O argumento **type = 'response'** indica que as previsões devem ser retornadas na escala da probabilidade de **resposta Y**:
+
+No geral, o modelo cometeu apenas 13 erros de classificação. Três tumores foram classificados como malignos quando na verdade eram benignos, e 10 tumores foram classificados como benignos enquanto na verdade eram malignos.
+
+```{r, eval=TRUE,message = FALSE, collapse=TRUE}
+# Prediçoes no conjunto de validação
+preds <- predict(ajuste, newdata=breast_pred, type='response') 
+
+# Matriz de confusão: limiar de probabilidade < 0,5 foi estabelecido. Isto é se a probabilidade estimada for < 0,5 o tumor será classificado como benigno.
+
+(Conf_matrix <- table(preds > 0.5, breast_pred$Class))                                          
+dimnames(Conf_matrix)[[1]] <- c('Tumor benigno', 'Tumor maligno')    # renomeando dim[1]
+dimnames(Conf_matrix)[[2]] <- c('Tumor benigno', 'Tumor maligno')    # renomeando dim[2]
+print(Conf_matrix)                                                   # imprime matriz
+
+#(Conf_matrix <- addmargins(A=Conf_matrix, margin = seq_along(dim(Conf_matrix)[1]))) # adiciona total às colunas
+
+```
+
+**Especificidade**: 122/(122+3)= 0,9760 (97,60%)
+
+**Sensibilidade**: 64/(64+10)= 0,8648 (86,48%)
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+# Calculando a sensibilidade e sensitividade do modelo
+(Esp <- Conf_matrix[1,1]/sum(Conf_matrix[,1]))                # cálculo manual especifidade
+(Sens <- Conf_matrix[2,2]/sum(Conf_matrix[,2]))                 # cálculo manual sensibilidade
+
+# Usando o pacote caret
+sensitivity(Conf_matrix)
+specificity(Conf_matrix)
+```
+
+
+**Fonte**: **Tutorial**: https://docs.ufpr.br/~taconeli/CE22518/Vinheta2.html
+
+```{r,eval=TRUE,message = FALSE, collapse=TRUE}
+library(ROCR)
+pred <- prediction(ajuste$fitted.values, breast_aj$Class)
+perf <- performance(pred,"tpr","fpr")
+plot(perf, xlab = '1 - Especificidade', ylab = 'Sensibilidade', 
+     main = "Curva ROC", col = "blue", lwd = 2)
+
+area <- performance(pred,"auc")
+area@y.values
+```
+
+
+# Questões propostas
+
+Com base nos resultados apresentados, responda as seguintes questões:
+
+1. Para uma unidade a mais no escore de CT (fixados os valores de MA e BC), a chance de um tumor
+maligno:
+
+a) É acrescida em 0.9118;
+b) Fica multiplicada por 0.9118;
+c) É acrescida em 2.4888;
+d) Fica multiplicada por 2.4888; (**Correta**)
+e) Não se altera.
+
+**R:** A letra **d** está correta.
+
+
+2. Para nódulos com CT=4, MA=4 e BC=5, a probabilidade estimada do tumor ser maligno é:
+a) 0.1732;
+b) 0.8268;
+c) 0.5432 (**Correta**)
+d) 0.4568;
+e) 1.
+
+**R:** A letra **c** está correta. (na escala da variável resposta)
+
+3. O limite inferior de um intervalo de confiança 95% para o parâmetro correspondente à variável CT é:
+a) 0.2138;
+b) 0.6632;   (**Correta**)
+c) 0.7850;
+d) 0.9118;
+e) 0.
+
+**R:** A letra **b** está correta.
+
+4. A sensibilidade e a especificidade do modelo são estimadas, respectivamente, por:
+a) 0.9552 e 0.9242;
+b) 0.8648 e 0.9760;   (**Correta**)
+c) 0.3216 e 0.6130;
+d) 0.7692 e 0.9346;
+e) 1 e 1.
+
+**R:** A letra **b** está correta.
+
+5. Com base apenas no gráfico de resíduos apresentado, podemos afirmar que:
+
+a) Os resíduos não têm distribuição normal, e portanto o modelo não está bem especificado;
+b) Os resíduos têm distribuição normal, e portanto o modelo está bem especificado;
+c) Os resíduos não têm distribuição binomial, e portanto o modelo não está bem especificado;
+d) Os resíduos têm distribuição binomial, e portanto o modelo está bem especificado;
+e) Nenhuma das afirmações é necessariamente verdadeira. (**Correta**)
+
+**R:** A letra **e** está correta.
