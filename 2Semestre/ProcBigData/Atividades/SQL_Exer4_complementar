@@ -1,0 +1,35 @@
+Aluno: Deivison Venicio Souza
+Exercício 4 (Complementar) - USANDO JOIN
+
+1. Crie uma consulta para exibir o nome (p_name) e o preço de varejo (p_retailprice) e
+o custo de fornecimento (ps_supplycost) dos itens de compra (part) em que o preço de
+varejo seja maior que R$ 2097.10.
+
+
+R: select p.p_name, p.p_retailprice, ps.ps_supplycost from part p INNER JOIN partsupp ps ON (p_partkey=ps_partkey and p.p_retailprice > 2097.10);
+
+
+2. Exibir o status do pedido (o_orderstatus) e o desconto (l_discount) com data entre
+11 de novembro de 1998 e 31 de dezembro de 1998.
+
+R: select o.o_orderstatus, l.l_discount from orders o INNER JOIN lineitem l ON (o_orderkey=l_orderkey and l.l_shipdate between '1998-11-11' and '1998-12-31');
+
+
+3. Crie uma consulta para exibir a a prioridade do pedido (o_orderpriority) o
+nome (c_name) e o endereço (c_address ) do cliente (customer) do país UNITED STATES e com conta (c_acctbal) maior que R$ 9990.
+
+
+R: select o.o_orderpriority, c.c_name, c.c_address from orders o INNER JOIN customer c ON (c_custkey=o_custkey and c_nationkey=24 and c_acctbal>9990);
+
+
+4. Crie uma consulta para exibir o nome (c_name) do cliente (customer) do país
+"UNITED STATES" e com conta (c_acctbal) maior que R$ 9990 e que a coluna c_mktsegment tenha o texto 'AUTO'.
+
+
+R: select c_name from customer c INNER JOIN nation n ON (c_nationkey=n_nationkey and n_name='UNITED STATES' and c_acctbal>9990 and c_mktsegment like 'AUTO%');
+
+
+5. Crie uma consulta para exibir o nome (c_name) dos clientes e o preço total(o_totalprice) dos clientes do BRAZIL.
+
+R: select c.c_name, o.o_totalprice from customer c INNER JOIN orders o ON (c_custkey=o_custkey and c_nationkey=2);
+
