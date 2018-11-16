@@ -1,0 +1,422 @@
+##
+## "Limpando a área de trabalho"
+## !!! cuidado, vai apagar todos os objetos !!!
+##
+rm(list=ls())
+par.ori <- par(no.readonly=TRUE)
+##
+## Gerando Dados (simulados)
+## distribuição exponencial com média 10
+## f(x) = \theta \exp{- \theta x} ; \lambda = 1/10
+set.seed(2012)
+dados <- round(rexp(10, rate=1/5), dig=2)
+dados
+summary(dados)
+
+##
+## Definindo a função de log-verossimilhança
+## (assumindo observações independentes)
+Lik <- function(par, dado, escala=FALSE){
+       res <- dexp(dado, rate=par, log=T)
+       if(escala) return(res/dexp(dado, rate=1/dado, log=T))
+       else return(res)
+       } 
+
+## gráfico das verrosimilhanças individuais de cada observação
+xmax <- ceiling(max(dados))
+curve(Lik(x, dado=min(dados), escala=F), 0, xmax, 
+      xlab=expression(lambda), ylab=expression(l(lambda)), lty=3)
+points(dados, rep(0, length(dados)))
+for(i in dados) curve(Lik(x, dado=i, escala=F), 0, xmax, add=T, lty=3)
+
+##
+## Definindo a função de log-verossimilhança
+## (assumindo observações independentes)
+
+## função de log-verossimilhança a partir da densidade 
+lLik <- function(theta, dados){
+  sapply(theta, function(x) 
+         sum(dexp(dados, rate=x, log=TRUE)))
+}
+
+#par(mfrow=c(1,2))
+## fazendo o gráfico da log-verossimilhança
+#par <- (0:100)/200
+curve(lLik(x, dados=dados), 0, 100/200)
+curve(lLik(x, dados=dados), 0, 100/200, add=T)
+#plot(par, lLik(par, dados), type="l", xlab=expression(theta), ylab=expression(l(theta)))
+
+## .. de outra forma
+curve(lLik(theta=x, dados), 0, 50/100, xlab=expression(theta), ylab=expression(l(theta)))
+	
+## Reescrevendo log-verossimilhança em função  de n e média
+## l(\theta) = n ( \log(\theta) - \theta \bar{y})
+lvExp0 <- function(theta, y) {
+  llik <- length(y)*(log(theta) - theta * mean(y))
+  return(llik)
+}
+
+## sobrepondo ao gráfico anterior 
+f <- function(x) lvExp0(theta=x, y=dados)
+curve(f, 0, 50/100, add=T, lty=2, col=2)
+ 	
+## redefinindo novamente, mas agora sem a necessidade de (re)calcular media e n a cada chamada da função
+## l(\theta) = n log(\theta) - \theta n \bar{y}
+lvExp <- function(theta, amostra) {
+  ## amostra = list(n, media)  
+  llik <- with(amostra, n* (log(theta) - theta * media))
+  return(llik)
+}
+
+am <- list(n=length(dados), media=mean(dados))
+## ou, sendo mais cuidadoso com possíveis NA's ...
+am <- list(n=sum(!is.na(dados)), media=mean(dados, na.rm=TRUE))
+
+f1 <- function(x) lvExp(theta=x, amostra=am)
+curve(f1, 0, 50/100, col=4)
+## "zoom" na função entre 0,10 e 0,40
+## para mostrar o comportamento ao redos do máximo
+curve(f1, 0.10, 0.40)
+
+## Comentários
+## - última forma evita cálculos desnecessários
+## - verrossimilhança assimétrica, mas quase simétrica ao redor do máximo
+
+##
+## EMV
+##
+
+## Vamos obter de diferentes formas
+## i) solução analítica (única necessária nesta caso)
+## Demais apenas para ilustração dos métodos:
+## ii) solução de equação 
+##     - Método sem uso de derivadas: Brent
+##     - Método com uso de derivadas: Newton-Raphson
+## iii) maximização de função de verossimilhança
+
+## solução analítica
+(theta.est <- 1/mean(dados))
+(lv.theta.est <- lvExp(theta.est, am))
+
+## estimação numérica
+
+## (i) via solução de equação (função escore) l'(\theta) = 0
+## l(\theta) = n log(\theta) - \theta n \bar{y}
+## U(\theta) = l'(\theta) = n / \theta - n \bar{y}
+
+## (a) Método de Brent (sem uso de derivadas)
+UExp <- function(theta, amostra){
+  return(with(amostra, n/theta - n * media))
+}
+
+uniroot(UExp, lower=0, upper=1, amostra=am)$root
+
+1/mean(dados)
+
+## (b) Método de Newton Rapson
+## \theta^{r+1} = \theta^{r} - U(\theta) / U'(\theta)
+## U(\theta) = l'(\theta) = n / \theta - n \bar{y}
+## U'(\theta) = l''(\theta) =  - n / \theta^2
+invHExp <- function(theta, amostra){
+  return( - theta^2/amostra$n)
+}
+
+maxit <- 100
+thetaNR <- 0.5
+iter <- 0
+d <- 1
+while(d > 1e-12 & iter <= maxit){
+    thetaNR.new <- 
+      thetaNR - UExp(thetaNR, am) * invHExp(thetaNR, am)
+    d <- abs(thetaNR - thetaNR.new)
+    print(c(iter,thetaNR, thetaNR.new,d,maxit)) 
+    thetaNR <- thetaNR.new ; iter <- iter + 1
+}
+
+Ux <- function(x) UExp(x, am)
+curve(Ux, -0,1);abline(h=0)
+curve(Ux, -1,1)
+
+
+## l(\theta) = n log(\theta) - \theta n \bar{y}
+## U(\theta) = l'(\theta) = n / \theta - n \bar{y}
+## U'(\theta) = l''(\theta) =  - n / \theta^2
+lvExp <- function(theta, amostra, logpar=FALSE) {
+  ## amostra = list(n, media)  
+  if(logpar) theta <- exp(theta)
+  llik <- amostra$n*log(theta) - theta * amostra$n * amostra$media
+  return(llik)
+}
+UExp <- function(theta, amostra, logpar=FALSE){
+  if(logpar) theta <- exp(theta)
+  U <- amostra$n/theta - amostra$n * amostra$media
+  return(U)
+}
+invHExp <- function(theta, amostra, logpar=FALSE){
+  if(logpar) theta <- exp(theta)
+  return( - theta^2/amostra$n)
+}
+
+maxit <- 1000; thetaNR <- log(0.5); iter <- 0; d <- 1
+while(d > 1e-12 & iter <= maxit){
+    cat(paste("iteração", iter, "\n"))
+    thetaNR.new <- thetaNR - UExp(thetaNR, am, logpar=T) * invHExp(thetaNR, am, logpar=T)
+    d <- abs(thetaNR - thetaNR.new)
+    thetaNR <- thetaNR.new ; iter <- iter + 1
+}
+thetaNR
+exp(thetaNR); iter
+
+f1 <- function(x) lvExp(theta=x,amostra=am, logpar=T)
+curve(f1, log(0.05), log(50/100))
+
+
+
+## (a) em 1-D use optimize
+(s1 <- optimize(lvExp, lower=0, upper=1, maximum=TRUE, amostra=am))
+(s2 <- optimize(lvExp, lower=-5, upper=5, maximum=TRUE, amostra=am, logpar=T))
+exp(s2$max)
+## 
+
+# (b) usando optim() !!esta funcao só é indicada para 2 ou mais parametros!!
+s1 <- optim(0.5, lvExp, method="Brent",
+             control=list(fnscale=-1), amostra=am)
+s1[1:2]
+s1 <- optim(log(0.5), lvExp,
+             control=list(fnscale=-1), amostra=am, 
+             logpar=TRUE)
+s1[1:2]
+exp(s1$par)
+##
+s1 <- optim(0.5, lvExp, method = "BFGS",
+             control=list(fnscale=-1), amostra=am)
+s1[1:2]
+s1 <- optim(log(0.5), lvExp, method = "BFGS",
+             control=list(fnscale=-1), amostra=am, logpar=TRUE)
+s1[1:2]
+exp(s1$par)
+
+##
+s1 <- optim(0.5, lvExp, method = "CG",
+             control=list(fnscale=-1), amostra=am)
+s1[1:2]
+s1 <- optim(log(0.5), lvExp, method = "CG",
+             control=list(fnscale=-1), amostra=am, logpar=TRUE)
+s1[1:2]
+exp(s1$par)
+##
+s1 <- optim(0.5, lvExp, lower=0, upper=Inf, 
+             method = "L-BFGS-B", 
+             control=list(fnscale=-1), amostra=am)
+s1 <- optim(0.5, lvExp, lower=1e-12, upper=Inf, method = "L-BFGS-B", 
+             control=list(fnscale=-1), amostra=am)
+s1[1:2]
+s1 <- optim(0.5, lvExp, lower=1e-8, upper=Inf, method = "L-BFGS-B", 
+             control=list(fnscale=-1), amostra=am)
+s1[1:2]
+
+##
+s1 <- optim(log(0.5), lvExp, gr=UExp, method = "BFGS",
+             control=list(fnscale=-1), amostra=am, logpar=TRUE)
+s1[1:2]
+exp(s1$par)
+
+
+## Pontos de corte a 5% e 1% para 1 parâmetro
+## P[L(\theta)/L(\hat{theta}) > c] = P[chi^2(1) < chi^2(1)(1-alpha)]
+## quantis da chi^2
+qchisq(c(0,90, 0.95, 0.99), df=1)
+## c = exp{-(1/2) chi^2(1)} 
+exp(-qchisq(c(0.90, 0.95, 0.99), df=1)/2) ## ~ 15 e 4%
+
+f1 <- function(x) lvExp(theta=x, amostra=am)
+curve(f1, 0.005, 1.5)
+
+# -2 \{ [ \log[ L(\theta)/L(\hat{theta}) ] \} ~ \chi^2_(1)
+lvExp(theta.est, am)
+qchisq(c(0.90, 0.95, 0.99), df=1)
+-qchisq(c(0.90, 0.95, 0.99), df=1)/2
+log(c(0.25, 0.15, 0.04))
+
+## Pontos de corte para IC's 90, 95 e 99%
+## (i) Baseado em probabilidades
+lvExp(theta.est, am) - qchisq(c(0.90, 0.95, 0.99), df=1)/2
+## (ii) Baseados em verossimilhanças relativas
+lvExp(theta.est, am) + log(c(0.25, 0.15, 0.04))
+## reescrevendo...
+## l(\theta) = log(L(\theta))  para L(\theta) = alpha * L(\hat{\theta}) 
+(corteICs <- log( c(0.25, 0.15, 0.04)*
+                 exp(lvExp(theta.est, am))))
+
+curve(f1, 0.05, 0.5)
+abline(h=corteICs)
+
+## encontrando os IC's
+## \theta | l(\theta) = corteICs
+
+ICExp <- function(theta, corte, ...) lvExp(theta, ...) -corte
+	
+(IC25.low <- uniroot(ICExp, c(0, theta.est), 
+                     amostra=am, corte=corteICs[1])$root)
+(IC25.up <- uniroot(ICExp, c(theta.est, 1), 
+                     amostra=am, corte=corteICs[1])$root)
+abline(v=c(IC25.low, IC25.up))
+
+## uniroot.all:::rootSolve
+require(rootSolve)
+(IC25 <- uniroot.all(ICExp, c(0,1), amostra=am, corte=corteICs[1]))
+(IC15 <- uniroot.all(ICExp, c(0,1), amostra=am, corte=corteICs[2]))
+(IC04 <- uniroot.all(ICExp, c(0,1), amostra=am, corte=corteICs[3]))
+
+IC15
+rev(-log(0.5)/IC15) ## IC da mediana
+
+abline(v=c(IC25, IC15, IC04)) 
+
+## Uma função mais conveniente para visualização: Deviance
+## D(\theta) = - 2 [ l(\theta) - l(\hat{theta}) ]
+
+## Função deviance genérica
+devFun <- function(theta, est, ...){
+  return(-2 * (lvExp(theta, ...) - lvExp(est, ...)))
+}
+
+## Função deviance para o modelo exponencial
+## D(\theta) = 2n [log(\hat{\theta}/\theta) + \bar{y}(theta-\hat{\theta})] 
+devExp <- function(theta, est, amostra){
+   return(2 * amostra$n * (log(est/theta)+ theta/est - 1) )
+}
+
+f <- function(x) devExp(theta=x, amostra=am, est=theta.est)
+curve(f, 0.03, 0.8)
+
+## cortes definidos por probabilidades
+(corteICs <- qchisq(c(0.90, 0.95, 0.99), df=1))
+abline(h=corteICs)
+## cortes definidos por percentuais da MV
+(corteICs <- -2*log(c(0.25, 0.15, 0.04)))
+abline(h=corteICs, col=2) 
+
+IC <- c(IC25, IC15, IC04)
+arrows(IC, devExp(IC, amostra=am, est=theta.est),
+        IC, rep(0,6), length=0.1, lty=c(1,1,2,2,3,3))
+
+
+## Aproximação Quadrática -  Taylor (2a ordem)
+## D(\theta) = [(\theta \hat{\theta})/\hat{\theta}]^2  
+
+devAproxExp <- function(theta, est, amostra){
+  return(amostra$n * ((theta/est) -1)^2) 
+}
+
+f <- function(x) devAproxExp(theta=x, amostra=am, est=theta.est)
+curve(f, 0.05, 0.8, col=2, add=T)
+
+## IC's podem ser obtidos analiticamente
+## IC:  \hat{\theta} ( 1 +/- \sqrt{c/n} )
+
+(ICa90 <- theta.est * (1 + c(-1,1) * sqrt(corteICs[1]/am$n)))
+(ICa95 <- theta.est * (1 + c(-1,1) * sqrt(corteICs[2]/am$n)))
+(ICa99 <- theta.est * (1 + c(-1,1) * sqrt(corteICs[3]/am$n)))
+
+ICa <- c(ICa90, ICa95, ICa99)
+arrows(ICa, devExp(ICa, amostra=am, est=theta.est),
+       ICa, rep(0,6), length=0.1, col=2, lty=c(1,1,2,2,3,3))
+
+
+## Outra parametrização!
+## log-verossimilhança para exponencial 
+#  f(x) = (1/alpha) exp(-x/alpha)
+## escrita como função de n e média
+lvExp2 <- function(lambda, amostra) {
+  ## amostra = list(n, media)  
+  llik <- -amostra$n*log(lambda) - amostra$n * amostra$media/lambda
+  return(llik)
+}
+
+f2 <- function(x) lvExp2(lambda=x,amostra=am)
+curve(f2, 0, 50)
+curve(f2, 0, 150)
+
+par(mfrow=c(1,2))
+curve(f1, 0, 50/100)
+curve(f2, 2, 180)
+par(par.ori)
+
+
+## Recursos adicionais
+
+## Algumas outras funções para otimização/maximização
+#nlm(), nlminb(), constrOptim(), optimx()
+
+## Funções facilitadosras com métodos
+require(stats4)
+neglvExp <- function(theta) {
+  ## amostra = list(n, media)  
+  llik <- am$n * (log(theta) - theta * am$media)
+  return(-llik)
+}
+
+est.mle1 <- mle(neglvExp, start=list(theta=0.5), 
+            method="CG")
+summary(est.mle1)
+logLik(est.mle1)
+AIC(est.mle1)
+coef(est.mle1)
+vcov(est.mle1)
+confint(est.mle1, level=0.95)
+plot(profile(est.mle1))
+
+
+## reparametrizando
+neglvExp.r <- function(theta) {
+  ## amostra = list(n, media) 
+  theta <- exp(theta) 
+  llik <- am$n * (log(theta) - theta * am$media)
+  return(-llik)
+}
+
+est.mle2 <- mle(neglvExp.r, start=list(theta=log(0.5)))
+summary(est.mle2)
+logLik(est.mle2)
+coef(est.mle2); exp(coef(est.mle2))
+vcov(est.mle2)
+confint(est.mle2, level=0.95)
+exp(confint(est.mle2, level=0.95))
+plot(profile(est.mle2))
+
+#require(bbmle)
+
+#mle2(minuslogl, start, method, optimizer,
+#    fixed = NULL, data=NULL, subset=NULL,
+#	default.start=TRUE, eval.only = FALSE, vecpar=FALSE,
+#	parameters=NULL, parnames=NULL, skip.hessian=FALSE,
+#	hessian.opts=NULL, use.ginv=TRUE, trace=FALSE, browse_obj=FALSE, transform=NULL,
+#	gr, optimfun,...)
+
+## reparametrizações:
+lvExp <- function(theta, amostra) {
+  ## amostra = list(n, media)  
+  llik <- with(amostra, n* (log(theta) - theta * media))
+  return(llik)
+}
+
+
+## vamos fazer o gráfico de outra forma:
+vals <- seq(0, 1, l=101)
+ll <- sapply(vals, lvExp, amostra=am) 
+plot(vals, ll, type="l")
+
+## phi1 <- 1/theta
+## podemos redefinir a função facilmente
+lvExp1 <- function(psi1, amostra) {
+  ## amostra = list(n, media)
+  theta <- 1/psi1  
+  llik <- with(amostra, n* (log(theta) - theta * media))
+  return(llik)
+}
+RRvals1 <- seq(0, 100, l=101)
+ll1 <- sapply(vals1, lvExp1, amostra=am) 
+plot(vals1, ll1, type="l")
+
+## mas.... pela invariancia isto não é necessá

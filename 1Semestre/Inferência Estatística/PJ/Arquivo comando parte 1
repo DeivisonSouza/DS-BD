@@ -1,0 +1,195 @@
+##
+## DSBD - Inferência
+## Aula de 30/06/2018
+
+##
+## Exemplo 1: amostra binomial
+##
+
+## Contexto: estimar a proporção $\theta$ de uma população que possui
+##           determinado atributo
+##
+## Emulando "processo" (contexto) no computador
+##
+
+## Geração (artificial) da População
+th <- 0.20    ## supondo theta conhecido = 0,20
+(POP <- sample(c(0,1), 100, prob=c(0.8, 0.2), rep=TRUE))
+set.seed(2018)
+POP <- sample(c(0,1), 10000000, prob=c(0.8, 0.2), rep=TRUE)
+mean(POP)   ## só para conferir...
+
+##
+## 1.1 Estimação e distribuição amostral
+##
+
+## tirando uma amostra ...
+(AM1 <- sample(POP, 80))
+(p1 <- mean(AM1))
+## vemos que o valor obtido da amostra é diferente é diferente do pupulacional
+
+## ... e além disto ele varia de uma amostra para outra como vemos a seguir
+(AM2 <- sample(POP, 80))
+(p2 <- mean(AM2))
+
+(AM3 <- sample(POP, 80))
+(p3 <- mean(AM3))
+
+(AM4 <- sample(POP, 80))
+(p4 <- mean(AM4))
+### ... os seja as estimativas mudam (variam) de uma amostra para outra
+### e de forma aleatória. Portanto o estimador (média dos dados o caso = proporção de 1's na amostra)
+### As estimativas têm portanto uma distribuição que é chamada de "distribuição amostral" 
+
+### Vamos obter (nesta simulação computacional) a distribuição amostral
+### Tomando então "um grande número" (10000) de amostras
+AMs <- matrix(sample(POP, 80*10000, rep=T), nrow=80)
+dim(AMs)
+### calculamos a estimativa (a proporção estimada) em cada amostra...
+ps <- apply(AMs, 2, mean)
+### e vemos o comportamento das 10000 estimativas:
+summary(ps)
+hist(ps, prob=TRUE, main="")
+lines(density(ps, bw=0.01), lwd=2)
+## E podemos deriar várias coisas como por exemplo os valores entre os quais estão
+## uma determinada fração (95% por exemplo) das proporções obtidas 
+abline(v=quantile(ps, prob=c(0.025, 0.975)), lty=2)
+
+## OK até aqui,
+## mas como saber se não temos as várias amostras da população, mas apenas uma delas?
+
+## em certos casos existe uma forma analítica (teórica) conhecida
+## no exemplo a proporção seguem umaição aproximadamente normal 
+plot(density(ps, bw=0.01), lwd=2, main="", xlab=expression(hat(theta)), ylab="densidade")
+curve(dnorm(x, m=th, sd=sqrt(th*(1-th)/80)), add=T, col=2)
+
+##
+## 1.2 Intervalos de confiança
+##
+
+## Intervalos de confiança obtidos pela distribuição amostral empírica (obtida por simulação) e teórica:
+(ICemp <- quantile(ps, prob=c(0.025, 0.975)))
+(ICteo <- qnorm(c(0.025, 0.975), m=th, sd=sqrt(th*(1-th)/80)))
+
+## e os intervalos coincidem!
+abline(v=ICemp, lwd=2)
+abline(v=ICteo, lty=1, col=2)
+
+## mas o problema é que não conhecemos $\theta$, então usando a distribuição "estimada" 
+## vamos que ele pode "se desviar" da correta
+est <- 17/80
+curve(dnorm(x, m=est, sd=sqrt(est*(1-est)/80)), add=T, col=4)
+ic <- est + c(-1, 1) * 1.96 * sqrt(est*(1-est)/80)
+abline(v=ic, col=4, lty=3)
+## ... e agora o intervalo é diferente dos anteriores
+
+## Aqui entra o argumento é "sutil" que leva ao
+## considere então onter o intervalo para várias amostras
+
+## para facilitar vamos fazer uma função que obtém uma amostra, calcula o intervalo e adiciona ao gráfico
+ic.f <- function(am, plot=FALSE, ...){
+    est <- mean(am)
+    ic <- est + c(-1, 1) * 1.96 * sqrt(est*(1-est)/80)
+    if(plot){
+        curve(dnorm(x, m=est, sd=sqrt(est*(1-est)/80)), add=T, col=4)
+        abline(v=ic, ...)
+    }
+    return(ic)
+}
+
+## e vejamos os intervalos para algumas amostras:
+ic.f(AM1, plot=TRUE, col=2, lty=3)
+ic.f(AM2, plot=TRUE, col=3, lty=3)
+ic.f(AM3, plot=TRUE, col=4, lty=3)
+ic.f(AM4, plot=TRUE, col=5, lty=3)
+
+## agora para as milhares de amostras
+ICs <- apply(AMs, 2, ic.f)
+dim(ICs)
+## vamos ver de 10 delas
+ICs[, 1:10]
+## e note que o intervalo da 10a delas não contém 0,20 !!!
+
+## os intervalos "em geral" contém o valor verdadeiro, mas pode acontecer
+## que para algumas amostras não contenha.
+## Mais precisamente, a proporção que contém é o "nivel de confiança"
+## que foi adotado para construir o intervalo (95%)
+
+## Vamos verificar isto, calculando primeiro se o intervalo de cada amostra
+## contém ou não o valor verdadeiro ($\theta=0,20$)
+
+## segue uma função apra ver se contém ...
+in.f <- function(x, val)
+    return(val > x[1] & val < x[2])
+## vamos ver para as 20 primeiras amostras
+(apply(ICs[,1:20], 2, in.f, val=0.20))
+## e agora calculando a proporção de todas as milhares de amostras que contém o valor verdadeiro
+mean(apply(ICs, 2, in.f, val=0.20))
+## deveria ser 95\% ! (diferenças podem ser devido à aproximação e/ou número de simulações)
+
+##
+## 1.3 Teste de Hipótese
+##
+
+## Vamos considerar agora que há um interesse prático em saber se a proporção está
+## acima de um valor de referência 0,15
+## Formalmente temos um teste estatístico de hipóteses no qual
+##     H_0 : p \leq 0.15
+##     H_a : p > 0,15
+
+## Inicialmente vamos ver o que ocorre nas milhares de amostras obtidas da população
+## das quais extraímos a distribuição amostral empírica
+plot(density(ps, bw=0.01), lwd=2, main="", xlab=expression(hat(theta)), ylab="densidade", ylim=c(0, 10))
+mean(ps < 0.15)   ## proporção de amostras com p<0.15 mesmo geradas com theta=0,20 !!
+abline(v=0.15, lty=3)   
+
+## Entretanto o cálculo anterior não é possível na prática
+## novamente... só temos uma amostra... se conhecessemos $\theta$ a distribuição amostral teórica seria
+curve(dnorm(x, m=th, sd=sqrt(th*(1-th)/80)), add=T, col=2)
+pnorm(0.15, m=th, sd=sqrt(th*(1-th)/80))
+
+## ... mas o problema é que não conhecemos $\theta$,
+## mas no contexto de teste de hipótese usamos a distribuição amostral "sob H_0"
+## ou seja para $\theta$ dado pelo valor da hipótese nula
+p0 <- 0.15
+curve(dnorm(x, m=p0, sd=sqrt(p0*(1-p0)/80)), add=T, col=4)
+
+## e vamos onde o valor obtido se posiciona nesta distribuição,
+## ou seja, se ele é ou não compatível com a distribuição supondo H_0
+est <- 17/80
+abline(v=est, lty=3, col=4)
+## a "compatibilidade" com a distribuição amostral sob $H_0$ é dada pela probabilidade
+## (ou proporção) de valores mais extremos que observado,
+## e este é o conceito de p-valor!
+pnorm(est, m=p0, sd=sqrt(p0*(1-p0)/80), lower=F)
+
+## Note a distinção da distribuição amostral  e da distribuição amostal sob H_0 !
+
+## Este 
+prop.test(17, 80, p=0.15, alt="greater", correct=FALSE)
+
+
+## Uma alternativa para teste de hipótese baseado na distribuição amostrar teórica:
+## o teste aleatorizado 
+
+## Podemos obter a distribuição amostral empírica sob H_0
+## simulando da mesmo forma que obtivemos sob o valor verdadeiro
+## Simulando sob H_0
+th0 <- 0.15             ## supondo $\theta$ definindo em H_0
+POP0 <- sample(c(0,1), 10000000, prob=c((1-th0), th0), rep=TRUE)
+mean(POP0)   ## só para conferir...
+
+AM0s <- matrix(sample(POP0, 80*10000, rep=T), nrow=80)
+dim(AMs)
+
+p0s <- apply(AM0s, 2, mean)
+summary(p0s)
+hist(p0s, prob=TRUE, main="")
+lines(density(p0s, bw=0.01), lwd=2)
+
+abline(v=17/80, lty=2, col=2)
+(pvalor <- mean(p0s > 17/80))  
+text(0.25, 8, substitute(pvalor==p, list(p=pvalor)))
+## a diferença é devida: (i) os fato do resultado teórico ser aproximado
+## (ii) variação devido à simulação (erro Monte Carlo)
+

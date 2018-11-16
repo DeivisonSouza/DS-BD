@@ -1,0 +1,286 @@
+##
+## Modelo AR1 com média 0 e variância 1
+## y_{y+1} = \rho y_t + e_t+1 
+##
+
+##
+## Simulação da série:
+##
+
+## Fixando valores necessários
+## Observacao inicial: y_1 = 0
+## Parâmetro:  \pho = 0.75
+## Numero de observacoes: n = 100 
+rho <- 0.7
+n <- 100
+y <- numeric(100) ## cria vetor de tamanho 100 com elementos nulos
+
+## simulando os dados
+set.seed(222)
+for(i in 2:n)
+  y[i] <- rho * y[i-1] + rnorm(1)
+
+## visualizando a série simulada
+plot(y, type="l")  
+
+## 
+## EMV:
+
+## A. Utilizando a forma fatorada [Y_1] \prod_{i=2}^2 [Y_i|Y_{i-1}]
+##    que é um produto de densidades univariadas
+
+## B. Utilizando a conjunta [Y_1, ..., Y_n] que é uma densidade multivariada
+
+##
+## A. Forma fatorada:
+##
+## - 2 soluções:
+## I. Verossimilhança condicional (excluindo a 1a observação)
+## II. Verossimilhança "completa" (usando todas observações)
+##
+  
+## I. função de (log) verossimilhança "simplificada" (condicional)  
+##   (ignorando a 1a observação)
+## [y_i|y_{i-1}] \sim N(rho * y[i-1], 1)  ; i = 2, ..., n
+
+
+## função para calcular a (log) verossimilhanca para 1 valor do parametro
+llAR1 <- function(par, dados){
+    n <- length(dados)
+    sum(dnorm(dados[2:n], mean=par*dados[1:n], sd=1, log=TRUE))
+  }
+
+
+## criando versao vetorizada da função (util, por exemplo, para fazer graficos)
+llAR1.V <- Vectorize(llAR1, "par")
+
+## Uma outra forma de criar a função vetorizada:
+#llV <- function(par, dados){
+#    n <- length(dados)
+#    ## fun1 calcula a (log) verossimilhanca para 1 valor do parametro
+#    fun1 <- function(P) sum(dnorm(dados[2:n], mean=P*dados[1:n], sd=1, log=TRUE))
+#    ## sapply "vetoriza"a funcao (calcula fun1 para varios valores do parametro
+#    sapply(par, fun1)
+#  }
+  
+rho.vals <- seq(0,1,l=100)
+ll.vals <- llAR1.V(rho.vals, dados=y)  
+plot(rho.vals, ll.vals, type="l", xlab=expression(rho), ylab=expression(l(rho)))  
+
+## ou, mais direto,  usando curve()
+curve(llAR1.V(x, dados=y), 0, 1, xlab=expression(rho), ylab=expression(l(rho)))  
+
+## EMV
+(rho.est <- optimize(llAR1, interval=c(0, 1), dados=y, maximum=TRUE))
+(rho.emv <- rho.est$max)
+
+abline(v=rho.emv)
+
+## Deviance
+devAR1 <- function(par, llfun=llAR1.V, est, ...)
+     2*(llfun(est, ...) - llfun(par, ...))
+
+curve(devAR1(x, est=rho.emv, dados=y), 0, 1, xlab=expression(rho), ylab=expression(D(rho)))  
+
+curve(devAR1(x, est=rho.emv, dados=y), 0.4, 0.9, xlab=expression(rho), ylab=expression(D(rho)))  
+text(0.55, 8,substitute(hat(rho) == a,  list(a=round(rho.emv, dig=3))))
+
+## Encontrando IC's
+require(rootSolve)
+
+## Para verossimilança relativa de 10%
+cL <- 0.1
+
+ICdev <- function(par, devfun, cD, ...) devfun(par, ...) - cD 
+
+(cD <- -2 * log(cL))
+(IC.rel10 <- uniroot.all(ICdev, c(0,1), devfun=devAR1, cD=cD, , est=rho.emv, dados=y))
+## adicionando ao gráfico
+segments(IC.rel10, c(0,0), IC.rel10, devAR1(IC.rel10, est=rho.emv, dados=y)) 
+IC.rel10r <- round(IC.rel10, dig=3) 
+text(0.55, 7, substitute(group("(", list(a, b), ")")[rel10], list(a=IC.rel10r[1], b=IC.rel10r[2])))
+
+## IC probabilistico (assintótico) 95%
+(cD <- qchisq(0.95, df=1))
+(IC.95 <- uniroot.all(ICdev, c(0,1), devfun=devAR1, cD=cD, , est=rho.emv, dados=y))
+IC.95r <- round(IC.95, dig=3)
+## adicionando ao gráfico
+segments(IC.95, c(0,0), IC.95, devAR1(IC.95, est=rho.emv, dados=y), col=2) 
+text(0.55, 6, substitute(group("(", list(a, b), ")")[95], list(a=IC.95r[1], b=IC.95r[2])))
+
+
+## II. função de (log) verossimilhança "completa" 
+##   (incluindo a 1a observação)
+## [y_1] \sim N(0, 1/(1-rho^2))  ; i = 2, ..., n
+## [y_i|y_{i-1}] \sim N(rho * y[i-1], 1)  ; i = 2, ..., n
+
+## Basta modificar a função:                                            
+llAR1c <- function(par, dados){
+    n <- length(dados)
+    dnorm(dados[1], mean=0, sd=sqrt(1/(1-par^2)), log=TRUE) +    
+       sum(dnorm(dados[2:n],mean=par*dados[1:(n-1)],sd=1,log=TRUE)) 
+  }
+
+llAR1c.V <- Vectorize(llAR1, "par")
+curve(llAR1c.V(x, dados=y), 0, 1, xlab=expression(rho), ylab=expression(l(rho)),
+      add=T, col=2)  
+
+optimize(llAR1c, c(0,1), dados=y, maximum=TRUE)
+ 
+## ... e reprocessar os demais comandos com llAR1c()
+
+## OBS:
+## 1. Comparar os resultados de I e II
+## 2. Note que existe EMV em forma fechada usando a verossimilhança condicional 
+## (obter a expressão), mas não para a completa!
+## 3. A função llAR1() pode ser reescrita de forma mais eficiente, 
+##    evitando o uso de dnorm() e utilizando a expressões das densidades
+##    escritas em função de estatísticas suficientes
+##    Isto reduz o tempo computacional em procedimentos interativos e/ou que avaliam 
+## a função muitas vezes
+
+##
+## B. Densidade conjunta (multivariada)
+##
+## Y_1, ... Y_N \sim N(0, \Sigma)
+## em que os elementos e \Sigma são
+## \sigma^2_{ii} = 1/(1-\rho^2)  e \sigma^2_{ij} = \rho^|i-j|(1/(1-\rho^2)) (para i \neq j)
+
+## A função de verossimilhança é entao dada pela densidade da normal multivariada
+
+## Ideias para construir a matrix de covariância  (para 5 observaçoes)
+
+## 3 formas equivalentes
+(D <- outer(1:5, 1:5, FUN=function(i,j) abs(i-j)))
+(DD <- D <- abs(outer(1:5, 1:5, FUN="-")))
+D <- diag(5)
+(D <- abs(row(D)-col(D)))
+##
+
+(rD <- (0.7^D) * 1/(1-0.7^2))
+
+## Comentários sobre como programar o cálculo da log-verrossimilhança
+n <- length(y)
+{S <- diag(n) ; S <- abs(row(S)-col(S))}
+S <- 0.7^S * 1/(1-0.7^2)
+
+require(mvtnorm); dmvnorm(y, rep(0,n), S, log=T)
+
+-(n/2) * log(2*pi) - 0.5*c(determinant(S, log=T)$mod) - 
+                     0.5*mahalanobis(y, center=0, cov=S)
+
+Schol <- chol(S)
+(-n/2) * log(2*pi) - sum(log(diag(Schol))) - 
+        0.5*drop(crossprod(backsolve(Schol, y, transpose=T)))
+
+(t1 <- system.time(replicate(500, dmvnorm(y, rep(0,n) , S, log=T))))
+(t2 <- system.time(replicate(500, (-n/2) * log(2*pi) - determinant(S, log=T)$mod/2 - 0.5*mahalanobis(y, center=0, cov=S))))
+(t3 <- system.time(replicate(500, {Schol <- chol(S);
+             (-n/2) * log(2*pi) - sum(log(diag(Schol))) - 0.5*crossprod(backsolve(Schol, y,transpose=T))})))
+
+t1
+t2
+t3
+
+rm(Schol)
+
+llAR1mv <- function(par, dados, lagM){
+   n <- length(dados)
+   if(missing(lagM)) 
+       lagM <- outer(1:n, 1:n, FUN=function(i,j) abs(i-j))
+   S <- (par^lagM) * 1/(1-par^2)
+   Schol <- chol(S)
+   return(drop(- sum(log(diag(Schol))) - 0.5*crossprod(backsolve(Schol, y, transpose=T))))
+}
+
+## to check
+llAR1(0.7, dados=y)
+llAR1c(0.7, dados=y)
+llAR1mv(0.7, dados=y) + (-n/2) * log(2*pi)
+DD <- outer(1:n, 1:n, FUN=function(i,j) abs(i-j))
+llAR1mv(0.7, dados=y, lagM=DD) + (-n/2) * log(2*pi)
+
+optimize(llAR1mv, c(0,1), dados=y, maximum=TRUE)
+optimize(llAR1mv, c(0,1), dados=y, lagM=DD, maximum=TRUE)
+
+system.time(optimize(llAR1mv, c(0,1), dados=y, maximum=TRUE))
+system.time(optimize(llAR1mv, c(0,1), dados=y, lagM=DD, maximum=TRUE))
+
+
+## Entretanto note que para AR1 a matrix \Sigma tem inversa de  forma conhecida,
+## e o código pode ser escrito de forma mais eficiente evitando inversão 
+## de matrix (ou solução de sistema)
+
+## se Si é a inversa, sua forma é:
+## iS_{i,i} = 1         para i=1 e i=n
+## iS_{i,i} = 1+\rho^2  para 1 < i < n
+## iS_{i,j} = -\rho     para  |i-j| = 1
+## iS_{i,j} = 0     para  |i-j| > 1
+n <- 5
+iS <- diag(1+0.7^2, n)
+diag(iS)[1] <- diag(iS)[n] <- 1
+iS[abs(row(iS)-col(iS))==1] <- -0.7
+iS
+
+#Neste caso, basta usar:
+
+## No cálculo "ineficiente" 
+#mahalanobis(dados, center=0, cov=S, inverted=TRUE)
+
+## No cálculo eficiente: substituir forward/backsolve() por multiplicação de matrizes 
+
+##$det(Sigma) = 1/(1-pho^2)
+require(mvtnorm); dmvnorm(y, rep(0,n), S, log=T)
+n <- 100
+iS <- diag(1+0.7^2, n)
+diag(iS)[1] <- diag(iS)[n] <- 1
+iS[abs(row(iS)-col(iS))==1] <- -0.7
+
+-(n/2) * log(2*pi) - 0.5*c(determinant(S, log=T)$mod) - 
+                     0.5*mahalanobis(y, center=0, cov=S)
+
+Schol <- chol(S)
+(-n/2) * log(2*pi) - sum(log(diag(Schol))) - 
+        0.5*drop(crossprod(backsolve(Schol, y, transpose=T)))
+
+-(n/2) * log(2*pi) +
+     0.5*c(determinant(iS, log=T)$mod) - 
+     0.5*mahalanobis(y, center=0, cov=iS, inverted=TRUE)
+
+0.5*(-n*log(2*pi) + log(1-0.7^2) -
+     mahalanobis(y, center=0, cov=iS, inverted=TRUE))
+
+iS <- diag(1+0.7^2, n)
+diag(iS)[1] <- diag(iS)[n] <- 1
+iS[abs(row(iS)-col(iS))==1] <- -0.7
+iS[1:5, 1:5]
+
+iSchol <- chol(iS)
+(-n/2) * log(2*pi) + sum(log(diag(iSchol))) - 
+        0.5*drop(crossprod(iSchol %*% y))
+
+0.5*(-n*log(2*pi) + log(1-0.7^2) - 
+        drop(crossprod(y, iS %*% y)))
+
+(t4 <- system.time(replicate(500, 0.5*(-n*log(2*pi) + log(1-0.7^2) -
+     mahalanobis(y, center=0, cov=iS, inverted=TRUE)))))
+
+(t5 <- system.time(replicate(500, 0.5*(-n*log(2*pi) + log(1-0.7^2) - 
+        drop(crossprod(y, iS %*% y))))))
+
+## lembrando que as anteriores com a Matriz Sigma eram:
+t1
+t2
+t3
+
+## algorítimos/funções para matrizes esparsas
+
+##
+## Algumas Implementações em R
+## (mas note que estas funções estima também a média e variância)
+#help(ar)
+ar(y, order.max=1, method="mle")
+
+help(arima)
+arima(y, order=c(1,0,0), method="ML")
+

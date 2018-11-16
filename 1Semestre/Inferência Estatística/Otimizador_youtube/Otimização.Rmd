@@ -1,0 +1,401 @@
+---
+title: "Inferência estatística"
+subtitle: "Otimização para previsão de inscritos em canais do YouTube"
+author:
+- name: Deivison Venicio Souza
+- name: Márcio de Liz
+- name: Charles Adriano dos Santos
+fontsize: 14pt
+lang: pt-BR
+date: '`r format(Sys.Date(),"%d/%B/%Y")`'
+
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: vignette
+    toc: yes
+    df_print: paged
+    number_sections: yes
+  pdf_document:
+    toc: yes
+csl: Global_Change_Biology.csl
+bibliography: INF.bib
+#output: 
+#    html_document:
+#        code_folding: show
+#        fig_caption: yes
+#        number_sections: yes
+#        theme: flatly
+#        toc: yes
+#        df_print: paged
+#    highlight: tango
+---
+
+```{r setup, include=TRUE}
+library(rmarkdown)
+knitr::opts_chunk$set(fig.align="center", cache=TRUE, prompt=FALSE, comment = NA, eval = TRUE)
+```
+
+# Descrição da atividade
+
+
+O conjunto de dados `youtube.csv` apresenta o numero de views e inscritos desde o dia de sua abertura para dois canais de sucesso do YouTube.O objetivo é predizer o número acumulado de inscritos em cada um destes canais para o próximo ano (365 dias). Para isto você decidiu emprestar um modelo biológico do crescimento de bactérias chamado `modelo logístico`, dado pela seguinte equação:
+
+$$
+y = \frac{L}{1 + e^{(\beta(x - \beta_0))}}
+$$
+
+Em que:
+
+$L$ = é o valor máximo da curva;
+
+$\beta_0$ = o valor de x no ponto médio da curva; e
+
+$\beta$ = declividade da curva.
+
+
+Assim, pede-se a solução para as seguintes questões:
+
+- Proponha e descreva um algoritmo para ajustar este modelo aos dados disponíveis.
+
+- Ajuste o modelo aos dados dos canais e reporte a sua predição de forma gráfica.
+
+# Carregando pacotes
+
+```{r library, eval=TRUE,message = FALSE}
+library(easypackages)
+libraries("ggplot2","ggthemes","data.table", "dplyr", "cowplot")
+```
+
+# Carregando dados (YouTube)
+
+```{r dados,eval=TRUE, collapse=TRUE, message = FALSE}
+#carrega os dados
+dados <- read.table("youtube.txt", header = T, sep="")
+
+#apenas p/ tranformar p/ minúsculo
+colnames(dados) <- tolower(colnames(dados))
+
+#apenas customizando os nomes dos canais
+dados$canal <- with(dados,ifelse((canal == "inventonahora"),"Canal-1" ,"Canal-2"))
+```
+
+# Análise exploratória dos dados
+
+```{r exploratoria,eval=TRUE,collapse=TRUE}
+str(dados)          # estrutura dos dados
+class(dados)        # classe do objeto dados
+names(dados)        # atributos disponíveis
+table(dados$canal)  # quantidade de observações por canal
+head(dados)         # 6 primeiras instâncias
+tail(dados)         # 6 últimas instâncias
+```
+
+# Frequências acumuladas de inscritos ao longo do tempo
+
+```{r fcumulada,eval=TRUE}
+setDT(dados)[,`:=`("fcuminsc"=cumsum(inscritos)/100000),
+             by=canal][]
+```
+
+# Visualização gráfica - Número de inscritos ao longo do tempo
+
+```{r graphic1, eval=TRUE, dpi= 600}
+ggplot(data=dados,aes(x=dias,y=inscritos,colour=canal))+
+  geom_point(aes(size=views))+
+  ggtitle(label="")+ theme_few()+
+  scale_color_manual(values=c("green","red"))+
+  theme(axis.line.x=element_line(size=0.5,colour="black"),
+        axis.line.y=element_line(size=0.5,colour="black"),
+        axis.line=element_line(size=1,colour="black"),
+        strip.text.x=element_text(colour="black",size=12,family="serif",face="bold"),
+        strip.background = element_rect(colour="black", fill="snow2"),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.border=element_rect(color="black"),
+        panel.background=element_blank(),
+        axis.text.x=element_text(colour="black",size=12,family="serif",angle=90),
+        axis.text.y=element_text(colour="black",size=12,family="serif"),
+        #legend.position="none",
+        legend.position=c(0.2,0.9), 
+        legend.box = "horizontal",
+        legend.direction="vertical",
+        legend.justification="center",
+        legend.key=element_rect(fill="white",colour="white"),
+        legend.text=element_text(size=12,colour="black",family="serif"),
+        legend.key.size=unit(1,"cm"),
+        legend.key.height=unit(0.8,"line"),
+        legend.margin=margin(t=0,r=0,b=0,l=0,unit="cm"),
+        legend.title=element_text(),
+        plot.title=element_text(hjust=0.50,size=16,face="bold",family="serif"),
+        plot.subtitle=element_text(hjust=0.50,size=12,face="italic",family="serif"))+
+  scale_x_continuous(name="Dias da abertura",
+                     breaks=c(seq(from=0,
+                                  to=max(dados$dias),
+                                  by=30)),
+                     limits=c(0,max(dados$dias)))+
+  scale_y_continuous(name="Número de inscritos",
+                     breaks=c(seq(from=0,
+                                  to=max(dados$inscritos),
+                                  by=1000)),
+                     limits=c(0,max(dados$inscritos)))
+```
+
+# Visualização gráfica - Curva acumulada de inscritos ao longo do tempo
+
+Inicialmente, faz-se uma manipulação dos dados usando a função `melt` do pacote `data.table` [@R-data.table] possibilitando, assim, o uso do argumento `facet_wrap` do pacote `ggplot2` [@R-ggplot2].
+
+
+```{r melt, eval=TRUE}
+melt<-melt(dados,id.vars = c("canal", "dias"), measure.vars = "fcuminsc",
+        value.factor = TRUE, variable.name = "variable", 
+        value.name = "fcum", na.rm = TRUE)
+```
+
+```{r graphic2, eval=TRUE, dpi= 600}
+ggplot(melt, aes(x=dias, y=fcum)) + geom_step() + 
+  geom_vline(data=filter(melt, canal=="Canal-1"), 
+             aes(xintercept=which.max(subset(dados, canal == "Canal-1")$dias)),
+             colour="red", linetype = "dashed") + 
+  geom_vline(data=filter(melt, canal=="Canal-2"), 
+               aes(xintercept=which.max(subset(dados, canal == "Canal-2")$dias)),
+               colour="red", linetype = "dashed") +
+  facet_wrap(~canal,scales="free") + theme_bw() +
+  theme(axis.line.x=element_line(size=0.5,colour="black"),
+        axis.line.y=element_line(size=0.5,colour="black"),
+        axis.line=element_line(size=1,colour="black"),
+        axis.text.x=element_text(colour="black",size=10,angle=90,family="serif"),
+        axis.text.y=element_text(colour="black",size=10,family="serif"),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.border=element_rect(),
+        panel.background=element_blank(),
+        plot.title=element_text(hjust=0.50,size=14,face="bold",family="serif"),
+        plot.subtitle=element_text(hjust=0.50, size=12,face="italic",family="serif"),
+        legend.text=element_text(size=12,colour="black",family="serif"),
+        legend.position=c(0.80,0.1),
+        legend.margin=margin(1,1,1,1),
+        legend.title=element_blank(),
+        legend.direction="horizontal")+
+  scale_y_continuous(name="Número de inscritos (por 1e+5)",
+                     breaks=c(seq(from=0,
+                                  to=25,
+                                  by=5)),
+                     limits=c(0,25))+
+  scale_x_continuous(name="Dias da abertura",
+                     breaks=c(seq(from=0,
+                                  to=max(dados$dias),
+                                  by=50)),
+                     limits=c(0,max(dados$dias)))
+```
+
+# Divide o conjunto de dados para modelagem
+
+Para realizar o procedimento de otimização para canal é necessário a divisão dos dados. Isso, foi feito utilizando-se da função `subset` do R-base [@R-base].
+
+```{r split, eval=TRUE, collapse=TRUE}
+Canal.1 <- subset(dados, canal == "Canal-1")
+Canal.2 <- subset(dados, canal == "Canal-2")
+```
+
+# Modelos testados e função perda
+
+O processo de otimização foi feito com os modelos linear e logístico. A variável **y** de interesse para previsão foi o acumulado do número de inscritos ao longo do tempo e a variável preditora **x** foi o tempo de abertura do canal (dias). A otimização foi feita para cada canal usando a função **optim**. A função perda quadrática foi utilizada para avaliar a bondade dos modelos.
+
+**1. Modelo Linear** (usando perda quadrática)
+
+Aqui, cria-se uma função que define o `modelo linear` a ser otimizado e, ainda, a função perda quadrática (SQ) para avaliar a bondade do ajuste. A modelo linear possui dois parâmetros ($\beta$ e $\beta_0$). Além disso, é necessário fornecer o valor da variável de previsão `y` (frequência acumulada do número de inscritos) e o valor da covariável `x` (dias de abertura do canal).
+
+$$
+y = \beta + \beta_0\ dias
+$$
+
+```{r}
+f_ols <- function(par, y, x,...) {
+  mu <- par[1] + par[2]*x
+  SQ <- sum((y - mu)^2)
+  return(SQ)
+}
+```
+
+**2. Modelo logístico** (usando perda quadrática)
+
+Aqui, cria-se uma função que define o `modelo logístico` a ser otimizado e, ainda, a função perda quadrática (SQ) para avaliar a bondade do ajuste. A modelo logístico possui três parâmetros ($L$, $\beta$ e $\beta_0$). Além disso, é necessário fornecer o valor da variável de previsão `y` (frequência acumulada do número de inscritos) e o valor da covariável `x` (dias de abertura do canal).
+
+$$
+y = \frac{L}{1 + e^{(\beta(dias - \beta_0))}}
+$$
+
+Em que:
+
+$L$: valor máximo da curva; = `par[1]`
+
+$\beta$: declividade da curva; = `par[2]`
+
+$\beta_0$: valor de x no ponto médio da curva. = `par[3]`
+
+```{r}
+f_logit <- function(par, y, x,...) {
+  mu <- par[1] / (1 + exp(par[2]*(x - par[3])))
+  SQ_logit <- sum((y - mu)^2)
+  return(SQ_logit)
+}
+```
+
+# Aplicando a otimização
+
+- Argumentos da função `optim()`:
+
+`par` = Valores iniciais estipulados para os parâmetros a serem otimizados;
+
+`fn` = Uma função a ser minimizada (ou maximizada), com o primeiro argumento o vetor de parâmetros sobre os quais a minimização deve ocorrer. Deve retornar um resultado escalar;
+
+`gr` = Uma função para retornar o gradiente para os métodos "BFGS", "CG" e "L-BFGS-B". Se for NULL,uma aproximação de diferenças finitas será usada;
+
+Para o método "SANN", especifica uma função para gerar um novo ponto candidato. Se for NULL, um kernel Gaussian Markov padrão é usado;
+
+`method` =  o metodo a ser usado. O método padrão é uma implementação de Nelder e Mead (1965), que usa apenas valores de função e é robusto, mas relativamente lenta. Funcionará razoavelmente bem para funções não diferenciáveis.
+
+- Retorno da função `optim()` (valores retorno)
+
+`par` = retorna um vetor com  o melhor conjunto de parâmetros encontrados;
+
+`value` = retorna o valor de fn corresponde ao par;
+
+`count` = Um vetor inteiro de dois elementos que indica o número de chamadas para fn e gr, respectivamente;
+
+`convergence` = **0** indica conclusão bem-sucedida (que é sempre o caso de "SANN" e "Brent"); e
+
+`message` = Uma cadeia de caracteres que fornece informações adicionais retornadas pelo otimizador ou **NULL**.
+
+## Canal 1
+
+### Modelo Linear (usando perda quadrática)
+
+- Usando a função `optim` (Nelder e Mead (1965)):
+
+```{r optimLMC1, eval=TRUE, collapse=TRUE}
+fit_ols_C1 <- optim(par = c(0,0), 
+                    fn = f_ols, 
+                    y = Canal.1$fcuminsc, 
+                    x = Canal.1$dias)
+```
+
+### Modelo logístico (usando perda quadrática)
+
+- Usando a função `optim` (Nelder e Mead (1965)):
+
+```{r optimLogitC1, eval=TRUE, collapse=TRUE}
+fit_logit_C1 <- optim(par = c(25,-0.007,600), 
+                      fn = f_logit, 
+                      y = Canal.1$fcuminsc, 
+                      x = Canal.1$dias)
+```
+
+## Canal 2
+
+### Modelo Linear (usando perda quadrática)
+
+- Usando a função `optim` (Nelder e Mead (1965)):
+
+```{r optimLMC2, eval=TRUE, collapse=TRUE}
+fit_ols_C2 <- optim(par = c(0,0), 
+                    fn = f_ols, 
+                    y = Canal.2$fcuminsc, 
+                    x = Canal.2$dias)
+```
+
+### Modelo logístico (usando perda quadrática)
+
+- Usando a função `optim` (Nelder e Mead (1965)):
+
+```{r optimLogitC2, eval=TRUE, collapse=TRUE}
+fit_logit_C2 <- optim(par = c(20,-0.001,400), 
+                      fn = f_logit, 
+                      y = Canal.2$fcuminsc, 
+                      x = Canal.2$dias)
+```
+
+# Obtendo as predições e a prognose para 365 dias
+
+Inicialmente, criou-se dois data tables com 3 colunas (`dias`, `pred_ols`, `pred_logit`). Para coluna dias obteve uma sequência considerando o máximo de dias observados de cada canal + 365 dias. As demais colunas foram preenchidas com `NA` para, posteriormente, receberem as predições do `modelo linear` e `logístico`:
+
+```{r, eval=TRUE, collapse=TRUE}
+DTpred_C1 <- data.table(dias = with(Canal.1,seq(1, max(dias) + 365)), 
+                        pred_ols = NA, pred_logit = NA)
+
+DTpred_C2 <- data.table(dias = with(Canal.2,seq(1, max(dias) + 365)), 
+                        pred_ols = NA, pred_logit = NA)
+```
+
+- **Predição** (Canal-1)
+
+```{r, eval=TRUE, collapse=TRUE}
+DTpred_C1$pred_ols <- fit_ols_C1$par[1] + fit_ols_C1$par[2]*DTpred_C1$dias
+
+DTpred_C1$pred_logit <- fit_logit_C1$par[1]/(1 + exp(fit_logit_C1$par[2]*(DTpred_C1$dias - fit_logit_C1$par[3])))
+```
+
+
+- **Predição** (Canal-2)
+
+```{r, eval=TRUE, collapse=TRUE}
+DTpred_C2$pred_ols <- fit_ols_C2$par[1] + fit_ols_C2$par[2]*DTpred_C2$dias
+
+DTpred_C2$pred_logit <- fit_logit_C2$par[1]/(1 + exp(fit_logit_C2$par[2]*(DTpred_C2$dias - fit_logit_C2$par[3])))
+```
+
+# Visualização gráfica: Curva Real versus Curva Ajustada (Canal-1)
+
+```{r}
+ggplot(Canal.1, aes(x=dias, y=fcuminsc)) + geom_step(linetype=1, lwd=0.8)+
+  geom_vline(data=Canal.1,aes(xintercept=which.max(Canal.1$dias)),
+             colour="blue", linetype = "dashed")+
+  geom_line(data=DTpred_C1,aes(x=dias,y=pred_logit), colour="red",lwd=0.6,lty=1) +
+  geom_hline(yintercept=fit_logit_C1$par[1],colour="green",lwd=0.5,lty="solid")+
+  ggtitle(label="Curva ajustada x Curva real",subtitle="(Inscritos no Canal-1)")+
+  theme_bw() +
+  theme(axis.line.x=element_line(size=0.5,colour="black"),
+        axis.line.y=element_line(size=0.5,colour="black"),
+        axis.line=element_line(size=1,colour="black"),
+        axis.text.x=element_text(colour="black",size=10,angle=90,family="serif"),
+        axis.text.y=element_text(colour="black",size=10,family="serif"),
+        panel.grid.major=element_blank(),
+        panel.grid.minor=element_blank(),
+        panel.border=element_rect(),
+        panel.background=element_blank(),
+        legend.position="bottom",
+        legend.direction="horizontal",
+        legend.justification="center",
+        legend.key=element_rect(fill="white",colour="white"),
+        legend.text=element_text(size=12,colour="black",family="serif"),
+        legend.key.size=unit(1,"cm"),
+        legend.key.height=unit(0.8,"line"),
+        legend.margin=margin(t=0,r=0,b=0,l=0,unit="cm"),
+        legend.title=element_blank(),
+        plot.title=element_text(hjust=0.50,size=16,face="bold",family="serif"),
+        plot.subtitle=element_text(hjust=0.50,size=14,face="italic",family="serif"))+
+  scale_y_continuous(name="Número de inscritos (por 1e+5)",
+                     breaks=c(seq(from=0,
+                                  to=25,
+                                  by=5)),
+                     limits=c(0,25))+
+  scale_x_continuous(name="Dias da abertura",
+                     breaks=c(seq(from=0,
+                                  to=max(Canal.1$dias)+400,
+                                  by=50)),
+                     limits=c(0,max(Canal.1$dias)+400))+
+  geom_text(position="identity",
+            aes(x = 1150 , y = fit_logit_C1$par[1]+0.6, label = "L = 24.20"))
+```
+
+
+
+# Informaçães da sessão
+
+```{r}
+sessionInfo()
+```
+
+# Referência
+
